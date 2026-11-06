@@ -97,6 +97,23 @@ class WindowsTest(unittest.TestCase):
         self.assertIn('"%s"' % PureWindowsPath("/srv/vault dir/scripts/x.py"), testo)  # su Windows tutti i separatori sono \, su qualunque host
         self.assertIn("&gt;&gt;", testo)
 
+    def test_nessuna_finestra_di_console_visibile(self):
+        """Regressione: con cmd.exe come comando ogni avvio apriva una finestra CMD vuota sul desktop."""
+        testo, _ = self.xml(FERIALE)
+        self.assertIn("<Command>conhost.exe</Command><Arguments>--headless cmd.exe /c ", testo)
+
+    def test_morning_del_template_gira_su_windows_feriali_alle_8_e_all_accesso(self):
+        """Regressione: morning era solo macOS ("os": ["macos"]) e install_jobs su Windows non lo registrava."""
+        jobs = json.loads((RADICE / "scripts" / "jobs.json").read_text(encoding="utf-8"))
+        self.assertIn("morning", ij.seleziona(jobs, "windows"))
+        self.assertIn("morning", ij.seleziona(jobs, "macos"))
+        testo, _ = self.xml(jobs["morning"])
+        self.assertIn("<StartBoundary>2026-01-01T08:00:00</StartBoundary>", testo)
+        self.assertIn("<DaysOfWeek><Monday /><Tuesday /><Wednesday /><Thursday /><Friday /></DaysOfWeek>", testo)
+        self.assertIn("<LogonTrigger>", testo)
+        self.assertIn("<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>", testo)  # un secondo avvio mentre gira è ignorato
+        self.assertIn('"%s"' % PureWindowsPath("/srv/vault dir/scripts/avvio.py"), testo)  # vault con spazi: tra virgolette
+
     def test_servizio_si_riavvia_e_non_ha_limite_di_tempo(self):
         testo, _ = self.xml(SERVIZIO)
         self.assertIn("<RestartOnFailure>", testo)

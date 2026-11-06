@@ -40,6 +40,22 @@ class AttivitaTest(unittest.TestCase):
         self.assertNotIn("vecchio", "".join(righe))
         self.assertIn("docs/wayfinder/t1.md", righe[1])
 
+    def test_l_output_e_utf8_anche_su_windows(self):
+        """Regressione: con -I su Windows l'output andava nella code page ANSI e avvio/chiudi-giornata, che leggono in UTF-8, si rompevano."""
+        import shutil
+        import sys
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "scripts").mkdir()
+            script = Path(shutil.copy(RADICE / "scripts" / "attivita-progetti.py", Path(d) / "scripts"))
+            stato = Path(d) / "projects" / "p" / "STATE.md"
+            stato.parent.mkdir(parents=True)
+            stato.write_text("- **Repo:** %s\n" % self.repo, encoding="utf-8")
+            git(self.repo, "commit", "-q", "--allow-empty", "-m", "caffè → fatto")
+            r = subprocess.run([sys.executable, "-I", str(script), "--giorni", "1"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               text=True, encoding="utf-8")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("caffè → fatto", r.stdout)
+
     def test_nessun_commit_nuovo_da_lista_vuota(self):
         soglia = int(__import__("datetime").datetime(2026, 10, 27).timestamp())
         self.assertEqual(ap.attivita(self.repo, soglia), [])

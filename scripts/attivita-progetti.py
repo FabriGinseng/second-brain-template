@@ -70,4 +70,7 @@ def main():
 
 
 if __name__ == "__main__":
+    # Callers read this output as UTF-8. Under -I PYTHONUTF8 is ignored, so on Windows a pipe would get the ANSI
+    # code page: an accent in a commit message would break the reader, a character outside it would crash here.
+    sys.stdout.reconfigure(encoding="utf-8")
     main()

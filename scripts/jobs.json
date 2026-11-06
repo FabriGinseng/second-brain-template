@@ -16,7 +16,8 @@
     "time": "08:00",
     "at_login": true,
     "os": [
-      "macos"
+      "macos",
+      "windows"
     ]
   },
   "chiusura": {

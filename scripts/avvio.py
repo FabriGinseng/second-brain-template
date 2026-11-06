@@ -44,7 +44,9 @@ def avvio(vault=VAULT, log=LOG, run=subprocess.run, env=os.environ, adesso=None,
         print(riga)
 
     def py(script, **kw):
-        return run([sys.executable, "-I", f"scripts/{script}"], cwd=vault, **kw)
+        # -X utf8: with -I, PYTHONUTF8 is ignored and on Windows a child writing to a pipe or to the job log would use
+        # the ANSI code page; an accented commit message or Claude's output would then break the UTF-8 read here.
+        return run([sys.executable, "-I", "-X", "utf8", f"scripts/{script}"], cwd=vault, **kw)
 
     rc = py("aggiorna-oggi.py").returncode
     if rc:

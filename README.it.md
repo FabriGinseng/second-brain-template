@@ -144,7 +144,7 @@ Subagenti: `researcher` (legge le novità e scrive schede in `radar/`), `reviewe
 
 | Job | Quando | Cosa fa |
 |---|---|---|
-| `second-brain.morning` | feriali 08:00 e al login (per ora solo macOS) | l'avvio del mattino: chiude il lavoro in sospeso, crea la nota del giorno |
+| `second-brain.morning` | feriali 08:00 e al login (macOS e Windows; su Linux non ancora) | l'avvio del mattino: chiude il lavoro in sospeso, crea la nota del giorno |
 | `second-brain.chiusura` | feriali 18:30 | `/chiudi-giornata`: riscrive gli STATE dai tuoi commit |
 | `second-brain.pulizia` | venerdì 18:00 | controllo settimanale e rapporto |
 | `second-brain.dashboard` | al login, sempre acceso | la dashboard locale |
@@ -177,6 +177,7 @@ Il modulo `scaffold` è facoltativo. Crea `scaffold/registro.md` (i template di 
 | Calendario: `macos` | sì | no | no |
 | Calendario: `ics` e `caldav` | provati con dati finti e un server finto | uguale | uguale |
 | Job pianificati (`install_jobs.py`) | sì | file generati e testati, non ancora registrati davvero | uguale |
+| Job del mattino (`second-brain.morning`) | sì | non ancora | file generato e testato, non ancora registrato davvero |
 
 «I test CI passano» vuol dire test automatici su un computer pulito, non che qualcuno l'abbia usato. Se lo provi su Linux o Windows, segnala cosa si è rotto.
 
@@ -193,6 +194,7 @@ Claude Code invia al modello i file che legge. Metti le note riservate nella car
 - **L'assistente dice che non conosce i tuoi appuntamenti**: non c'è un calendario collegato, il calendario non si legge, oppure il modello è `claude` e non hai permesso di inviare gli appuntamenti. `config.json` mostra `calendario.provider` e `moduli.assistente`.
 - **«è leggibile da altri utenti»**: `chmod 600` su quel file.
 - **Su Windows `./scripts/verify` non parte dentro Claude Code** (Git Bash non riesce a lanciare il `python3` dello shebang): usa `py -3 scripts/verify`. I comandi e i permessi lo prevedono già.
+- **Su Windows i job girano senza finestra**: l'Utilità di pianificazione li avvia con `conhost.exe --headless`, quindi non compare nessuna finestra CMD vuota. Se un job registrato prima di questa modifica ne apre ancora una, lancia di nuovo `py -3 install_jobs.py` per registrarlo di nuovo.
 - **`scripts/verify` protesta**: il messaggio nomina il file e la riga; correggi e rilancialo.
 - **I job non girano su Linux quando sei uscito**: `loginctl enable-linger $USER`.
 

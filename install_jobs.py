@@ -174,9 +174,11 @@ def piano_windows(nome, job, ctx):
            "<Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>"
            "<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><StartWhenAvailable>true</StartWhenAvailable><Enabled>true</Enabled>"
            "<ExecutionTimeLimit>%s</ExecutionTimeLimit>%s</Settings>"
-           "<Actions Context=\"Author\"><Exec><Command>cmd.exe</Command><Arguments>%s</Arguments><WorkingDirectory>%s</WorkingDirectory></Exec></Actions></Task>"
+           "<Actions Context=\"Author\"><Exec><Command>conhost.exe</Command><Arguments>%s</Arguments><WorkingDirectory>%s</WorkingDirectory></Exec></Actions></Task>"
            % (escape("second-brain %s: %s" % (nome, job.get("description", ""))), "".join(trigger), "PT0S" if job.get("service") else "PT2H", riavvio,
-              escape('/c "%s >> "%s" 2>&1"' % (riga, log)), escape(str(ctx["vault"]))))
+              # An InteractiveToken task running cmd.exe pops up an empty console window on every run. conhost --headless
+              # gives cmd and its children (python, git, claude) a console that is never shown; the log redirect is unchanged.
+              escape('--headless cmd.exe /c "%s >> "%s" 2>&1"' % (riga, log)), escape(str(ctx["vault"]))))
     nome_file = "%s.xml" % etichetta
     percorso = Path(ctx["home"]) / ".second-brain-jobs" / nome_file
     return {"file": [(nome_file, xml.encode("utf-16"))], "dest": percorso.parent,

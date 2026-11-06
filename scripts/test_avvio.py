@@ -32,7 +32,7 @@ class Avvio(unittest.TestCase):
 
     def run_finto(self, cmd, **kw):
         self.chiamate.append(cmd)
-        nome = cmd[0] if cmd[0] in ("git", "open") else Path(cmd[2]).name
+        nome = cmd[0] if cmd[0] in ("git", "open") else Path(cmd[-1]).name
         uscita = {"git": self.pending, "attivita-progetti.py": self.nuovi}.get(nome, "")
         return Esito(self.rc.get(nome, 0), uscita + "\n" if uscita else "")
 
@@ -45,7 +45,7 @@ class Avvio(unittest.TestCase):
         return rc, buf.getvalue()
 
     def nomi(self):
-        return [c[0] if c[0] in ("git", "open") else Path(c[2]).name for c in self.chiamate]
+        return [c[0] if c[0] in ("git", "open") else Path(c[-1]).name for c in self.chiamate]
 
     def test_vault_pulito_e_brief_presente(self):
         (self.v / "daily" / "2026-11-03.md").write_text("x")
@@ -73,6 +73,15 @@ class Avvio(unittest.TestCase):
         self.assertEqual(self.nomi(), ["aggiorna-oggi.py", "git", "attivita-progetti.py", "chiudi-giornata.py", "morning.py", "open"])
         self.assertIn("dashboard aperta su http://127.0.0.1:8765/", out)
         self.assertIn("da chiudere: modifiche non committate", self.log.read_text(encoding="utf-8"))
+
+    def test_gli_script_figli_scrivono_in_utf8_anche_su_windows(self):
+        """Con -I PYTHONUTF8 non vale: senza -X utf8 su Windows un accento nell'output dei figli rompe la lettura in UTF-8."""
+        self.pending = " M x"
+        self.vai()
+        figli = [c for c in self.chiamate if c[0] not in ("git", "open")]
+        self.assertEqual(len(figli), 4)
+        for c in figli:
+            self.assertEqual(c[1:4], ["-I", "-X", "utf8"], c)
 
     def test_attende_la_dashboard_al_massimo_20_volte(self):
         self.risposte = []
