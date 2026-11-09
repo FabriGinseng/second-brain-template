@@ -80,8 +80,8 @@ def progetti():
             "doveSono": testo_sezione(state, "Dove sono"),
             "passi": voci_sezione(state, "Prossimi 3 passi", NUMERATA),
             "blocchi": voci_sezione(state, "Blocchi aperti", PUNTO),
-            "attivita": attivita(repo_di(state)),
-            "avanzamento": avanzamento(repo_di(state)),
+            "attivita": attivita_progetto(repo_di(state)),
+            "avanzamento": avanzamento_progetto(repo_di(state)),
         })
     return out
 
@@ -102,8 +102,38 @@ def voci_sezione(stato, titolo, voce):
 
 
 def repo_di(stato):
-    m = REPO.search(stato)
-    return m.group(1).strip() if m else None
+    """Percorsi delle righe `Repo:` di uno STATE, in ordine e senza doppioni: un progetto può avere più repo."""
+    return list(dict.fromkeys(p.strip() for p in REPO.findall(stato) if p.strip()))
+
+
+def attivita_progetto(repo_progetto):
+    """attivita() di tutti i repo del progetto, unita nella stessa forma. None se nessuno si legge.
+    Con un solo repo è identica a attivita() di quel repo."""
+    letti = [(r, a) for r in repo_progetto if (a := attivita(r))]
+    if not letti:
+        return None
+    if len(repo_progetto) == 1:
+        return letti[0][1]
+    commit = [{**c, "ramo": "%s %s" % (Path(r).name, c["ramo"])} for r, a in letti for c in a["commit"]]
+    return {
+        "ultimoCommit": max(a["ultimoCommit"] for _, a in letti),
+        "giorni": [{"data": g["data"], "n": sum(a["giorni"][i]["n"] for _, a in letti)} for i, g in enumerate(letti[0][1]["giorni"])],
+        "branch": " · ".join("%s: %s" % (Path(r).name, a["branch"]) for r, a in letti),
+        "nonCommittate": sum(a["nonCommittate"] for _, a in letti),
+        "commit": sorted(commit, key=lambda c: c["quando"], reverse=True)[:4],
+    }
+
+
+def avanzamento_progetto(repo_progetto):
+    """avanzamento() di tutti i repo del progetto, sommato; con più repo ogni mappa porta il nome del repo."""
+    letti = [(r, a) for r in repo_progetto if (a := avanzamento(r))]
+    if not letti:
+        return None
+    if len(repo_progetto) == 1:
+        return letti[0][1]
+    mappe = [{**m, "nome": "%s %s" % (Path(r).name, m["nome"])} for r, a in letti for m in a["mappe"]]
+    return {"chiusi": sum(a["chiusi"] for _, a in letti), "totale": sum(a["totale"] for _, a in letti), "mappe": mappe,
+            "aperti": [t for _, a in letti for t in a["aperti"]]}
 
 
 def _commit(riga):
@@ -589,9 +619,11 @@ def configurazione_dati():
     """Skill, plugin, hook e MCP del globale, del vault e dei repo di projects/*/STATE.md (non la cartella riservata)."""
     progetti_repo = [("second-brain", VAULT)]
     for stato in sorted((VAULT / "projects").glob("*/STATE.md")):
-        repo = repo_di(stato.read_text(encoding="utf-8"))
-        if repo:
-            progetti_repo.append((stato.parent.name, Path(repo)))
+        repo_progetto = repo_di(stato.read_text(encoding="utf-8"))
+        for repo in repo_progetto:
+            # With several repos the name says which one, so the panel has no two entries with the same name.
+            nome = stato.parent.name + (" (%s)" % Path(repo).name if len(repo_progetto) > 1 else "")
+            progetti_repo.append((nome, Path(repo)))
     return configurazione.raccogli(progetti_repo, ultimo_controllo_skill())
 
 
@@ -744,20 +776,21 @@ def consumo_claude(adesso, giorni=14, cartella=None):
 
 
 def _progetti_con_repo():
-    """Nome -> cartella docs/ del repo del progetto, dalle righe di INDEX e dalla riga `Repo:` degli STATE."""
+    """Nome -> cartelle docs/ dei repo del progetto, dalle righe di INDEX e dalle righe `Repo:` degli STATE.
+    Solo docs/, mai la radice del repo: sono le sole cartelle da cui la pagina serve immagini."""
     out = {}
     for riga in (VAULT / "projects" / "INDEX.md").read_text(encoding="utf-8").splitlines():
         m = RIGA_PROGETTO.match(riga)
         if m:
-            repo = repo_di((VAULT / "projects" / m.group(1) / "STATE.md").read_text(encoding="utf-8"))
-            out[m.group(1)] = Path(repo) / "docs" if repo and repo != "nessuno" else None
+            repo_progetto = repo_di((VAULT / "projects" / m.group(1) / "STATE.md").read_text(encoding="utf-8"))
+            out[m.group(1)] = [Path(r) / "docs" for r in repo_progetto if r != "nessuno"]
     return out
 
 
 def post_calendari():
     """Un calendario per ogni `projects/<progetto>/post-<canale>.json` dei progetti in INDEX."""
     progetti = _progetti_con_repo()
-    cartelle = [d for d in progetti.values() if d]
+    cartelle = [d for docs in progetti.values() for d in docs]
     out = []
     for c in post_modulo.scopri(VAULT / "projects", progetti):
         try:
@@ -781,7 +814,7 @@ def post_trova(progetto, canale):
     progetti = _progetti_con_repo()
     for c in post_modulo.scopri(VAULT / "projects", progetti):
         if c["progetto"] == progetto and c["canale"] == canale:
-            return c["file"], [d for d in progetti.values() if d]
+            return c["file"], [d for docs in progetti.values() for d in docs]
     return None, []
 
 

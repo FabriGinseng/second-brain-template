@@ -8,7 +8,8 @@ Uso: scripts/repo-non-tracciato.py [--cwd DIR]
          Salva la risposta in scaffold/ignorati.md. Per «lavoro» salva solo l'impronta del percorso, mai il
          percorso (ADR-002: nel vault non devono finire nomi di clienti).
 
-Un repo è tracciato se il suo percorso è nel campo «Repo:» di un projects/*/STATE.md. La cartella riservata del
+Un repo è tracciato se il suo percorso è in una riga «Repo:» di un projects/*/STATE.md (un progetto può averne più
+d'una, una per repo). La cartella riservata del
 lavoro non si legge (ADR-001, ADR-002). Un worktree conta come il suo repo principale.
 """
 import argparse
@@ -56,9 +57,10 @@ def tracciato(repo, vault):
     for stato in (vault / "projects").glob("*/STATE.md"):
         if stato.parent.name in PRIVATE_DIRS:
             continue
-        m = REPO.search(stato.read_text(encoding="utf-8", errors="replace"))
-        if m and Path(m.group(1).strip()).expanduser().resolve() == repo:
-            return True
+        # A project can span several repos, one `Repo:` line each: any of them makes the repo tracked.
+        for percorso in REPO.findall(stato.read_text(encoding="utf-8", errors="replace")):
+            if Path(percorso.strip()).expanduser().resolve() == repo:
+                return True
     return False
 
 
@@ -91,7 +93,8 @@ def messaggio(cwd, vault, oggi, escludi=None, casa=None):
         return ""
     return (f"Il repo «{repo.name}» ({repo}) non è nel second brain.\n"
             f"Chiedi all'utente, una volta, se tracciarlo: sì, non ora, ignora o lavoro. Salva la risposta con "
-            f"`python3 {Path(__file__).resolve()} --registra ignora|non-ora|lavoro` (per «sì» usa `/nuovo-progetto <nome> {repo}`).")
+            f"`python3 {Path(__file__).resolve()} --registra ignora|non-ora|lavoro` (per «sì» usa `/nuovo-progetto <nome> {repo}`, "
+            f"o aggiungi `- **Repo:** {repo}` sotto le righe Repo dello STATE di un progetto esistente).")
 
 
 def registra(repo, vault, scelta, oggi):

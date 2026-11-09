@@ -129,7 +129,7 @@ Start `claude` in the vault folder and type:
 
 | Command | What it does |
 |---|---|
-| `/nuovo-progetto <name> [path]` | creates the project folder, its `STATE.md` and the row in `projects/INDEX.md`; with a path it also writes the `Repo:` field |
+| `/nuovo-progetto <name> [path]` | creates the project folder, its `STATE.md` and the row in `projects/INDEX.md`; with a path it also writes the `Repo:` field (one line per repo for a multi-repo project) |
 | `/morning` | the morning brief: projects, news, priorities |
 | `/chiudi-giornata` | rewrites the STATE files from your commits, runs the checks and commits locally; never pushes |
 | `/weekly-review` | what moved, what is stuck, what is neglected |
@@ -169,7 +169,18 @@ The `scaffold` module is optional. It creates `scaffold/registro.md` (the projec
 
 - `/adotta-repo` asks where to look, lists the git repos the vault does not know (repos with the same remote are grouped) and records your answer for each: track it, ignore it, ask again in 7 days, or "work". For a work repo only a hash of the path is saved, never the path or the name.
 - `scripts/repo-non-tracciato.py` tells whether the current folder is an untracked git repo. It never writes by itself. With the hook in `scaffold/hook-avvio.md` Claude Code can remind you when you open such a repo. That hook touches your global `~/.claude` settings, so the wizard does **not** install it: the file shows the two lines to paste, and you decide.
-- A repo is "tracked" when its path is in the `Repo:` field of a `projects/*/STATE.md`.
+- A repo is "tracked" when its path is in a `Repo:` line of a `projects/*/STATE.md`.
+- One project can span several repos (for example a backend, an app and a frontend): write one `- **Repo:** <path>` line per repo, one under the other, one absolute path per line. `/chiudi-giornata`, the morning start, `/weekly-review` and the dashboard read the commits of all of them, and none of them shows up as untracked. In `/adotta-repo` a "yes" can add the repo to an existing project instead of creating a new one.
+
+  ```markdown
+  - **Repo:** /srv/code/shop/backend
+  - **Repo:** /srv/code/shop/app
+  - **Repo:** /srv/code/shop/frontend
+  ```
+
+## Remote agents from your phone (optional)
+
+You can start and follow Claude Code agents on your projects from a phone with [Paseo](https://paseo.sh), an open-source daemon with iOS and Android apps. The second brain prepares the context and the prompt; you start the agent from the app; the evening close sees its commits as usual. Nothing in the vault changes. Read [docs/remote-agents-paseo.md](docs/remote-agents-paseo.md) **before installing**: Paseo's defaults (no password, agent-control tools, unsigned Windows updates) need hardening, and the guide lists the exact settings for Windows, macOS and a Linux VM.
 
 ## Platform support
 

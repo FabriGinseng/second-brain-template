@@ -69,6 +69,16 @@ class RepoNonTracciatoTest(unittest.TestCase):
         self.traccia(self.repo)
         self.assertEqual(self.msg(), "")
 
+    def test_piu_righe_repo_tracciano_tutti_i_repo(self):
+        """Regressione: si leggeva solo la prima riga Repo:, e il secondo e il terzo repo del progetto restavano «non tracciati»."""
+        app, web = nuovo_repo(self.base, "app"), nuovo_repo(self.base, "web")
+        stato = self.vault / "projects" / "progetto-a" / "STATE.md"
+        stato.write_text(f"# x\n- **Repo:** {self.repo}\n- **Repo:** {app}\n- **Repo:** {web}\n- **Aggiornato:** {OGGI}\n")
+        for repo in (self.repo, app, web):
+            self.assertTrue(rnt.tracciato(repo, self.vault), repo)
+            self.assertEqual(self.msg(repo), "")
+        self.assertFalse(rnt.tracciato(nuovo_repo(self.base, "altro"), self.vault))
+
     def test_sottocartella_del_repo_conta_come_il_repo(self):
         self.traccia(self.repo)
         sotto = self.repo / "src"

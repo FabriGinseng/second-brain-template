@@ -9,7 +9,7 @@ Chiudi la giornata di lavoro nel vault. Scrivi in italiano.
    - `git log` del vault di oggi e la conversazione.
    Se restano dubbi su un punto, chiedi all'utente prima di scrivere.
    **Se la sessione è non presidiata** (lanciata da uno script, senza nessuno davanti): non fare domande. L'attività dei repo conta come dato nuovo. Senza attività dei repo e senza altri dati non toccare gli STATE. Dopo il punto 4 fermati: verifica e commit li fa `scripts/chiudi-giornata.py`, perché nelle run non presidiate Bash è negato e il tentativo di lanciarli si perde in un errore.
-2. **STATE.** Per ogni progetto con attività dei repo riscrivi `projects/<nome>/STATE.md` da zero, usando `templates/STATE.md`, e metti sempre la data di oggi in *Aggiornato*. Massimo 20 righe. Tieni la riga `Repo:`. Ciò che non è più attuale va in `projects/<nome>/decisions.md`, con la data.
+2. **STATE.** Per ogni progetto con attività dei repo riscrivi `projects/<nome>/STATE.md` da zero, usando `templates/STATE.md`, e metti sempre la data di oggi in *Aggiornato*. Massimo 20 righe. Tieni tutte le righe `Repo:`, una per repo, così come sono: con più repo l'attività ha ogni riga preceduta da `[nome-del-repo]`. Ciò che non è più attuale va in `projects/<nome>/decisions.md`, con la data.
    - *Dove sono*: riassumi cosa mostrano i commit e i ticket di wayfinder chiusi o aperti. Non inventare.
    - *Prossimi passi*: togli quelli che i commit mostrano chiusi e aggiungi solo quelli che i ticket aperti indicano con chiarezza. Altrimenti lasciali come sono.
    - *Blocchi aperti*: lasciali com'erano, salvo un commit che li risolve in modo evidente.

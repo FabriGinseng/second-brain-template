@@ -1,5 +1,5 @@
 # {{title}}
-- **Repo:** <percorso locale, o "nessuno">
+- **Repo:** <percorso locale, o "nessuno"; più repo: una riga Repo per ognuno>
 - **Aggiornato:** {{date:YYYY-MM-DD}}
 ## Obiettivo attuale
 <una o due righe>

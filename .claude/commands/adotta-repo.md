@@ -12,9 +12,10 @@ Aiuta l'utente a decidere cosa fare dei repo che esistono già sul computer e il
    - **non ora**: richiedi tra 7 giorni;
    - **lavoro**: è un repo di lavoro, non va nel vault.
    Un numero senza scelta resta da decidere. Se l'utente non sa se un repo è di lavoro, non dedurlo: lascialo da decidere.
-4. **Riepilogo e conferma.** Prima di scrivere, elenca cosa farai per ogni numero e chiedi conferma. Per «sì» chiedi anche il nome del progetto (minuscolo con trattini; proponine uno dal nome della cartella).
+4. **Riepilogo e conferma.** Prima di scrivere, elenca cosa farai per ogni numero e chiedi conferma. Per «sì» chiedi anche se è un progetto nuovo o un repo in più di un progetto che esiste già (per esempio il frontend di un progetto che ha già il backend): proponi i nomi di `projects/INDEX.md`. Per un progetto nuovo chiedi il nome (minuscolo con trattini; proponine uno dal nome della cartella).
 5. **Scrittura**, solo dopo la conferma:
-   - **sì**: segui `/nuovo-progetto <nome> <percorso>` (cartella, `STATE.md` col campo `Repo:`, riga in `projects/INDEX.md`);
+   - **sì**, progetto nuovo: segui `/nuovo-progetto <nome> <percorso>` (cartella, `STATE.md` col campo `Repo:`, riga in `projects/INDEX.md`);
+   - **sì**, progetto esistente: in `projects/<nome>/STATE.md` aggiungi la riga `- **Repo:** <percorso assoluto>` subito sotto l'ultima riga `Repo:`; se l'unica riga `Repo:` è il segnaposto o `nessuno`, sostituiscila. Metti la data di oggi in *Aggiornato* e nell'ultima colonna della riga del progetto in `projects/INDEX.md` (`scripts/verify` le confronta); non cambiare altro dello STATE e resta sotto le 20 righe. Mai nella cartella riservata (ADR-001, ADR-002);
    - **ignora**, **non ora**, **lavoro**: `python3 scripts/repo-non-tracciato.py --registra ignora|non-ora|lavoro --cwd <percorso del repo>`. Per «lavoro» finisce nel vault solo l'impronta del percorso, mai il percorso né il nome: non scriverli altrove (ADR-001, ADR-002).
 6. **Verifica.** Esegui `./scripts/verify` (su Windows `py -3 scripts/verify`, perché lo shebang non vale). Expected: `OK`. Se non passa, correggi solo ciò che hai scritto tu.
 

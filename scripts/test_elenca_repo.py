@@ -85,6 +85,13 @@ class ElencaRepoTest(unittest.TestCase):
         self.assertEqual(out["gruppi"], [])
         self.assertEqual(out["tracciati"], 1)
 
+    def test_tutte_le_righe_repo_contano_come_tracciate(self):
+        a, b = nuovo_repo(self.scan, "a"), nuovo_repo(self.scan, "b")
+        (self.vault / "projects" / "p" / "STATE.md").write_text(f"- **Repo:** {a}\n- **Repo:** {b}\n")
+        out = self.elenco()
+        self.assertEqual(out["gruppi"], [])
+        self.assertEqual(out["tracciati"], 2)
+
     def test_ignorato_e_lavoro_non_compaiono(self):
         a = nuovo_repo(self.scan, "a")
         b = nuovo_repo(self.scan, "b")

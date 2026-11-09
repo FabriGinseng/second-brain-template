@@ -4,7 +4,7 @@
 Uso: scripts/elenca-repo.py CARTELLA [CARTELLA ...] [--profondita 3]
 
 Stampa un elenco numerato, con i repo che hanno lo stesso remote raggruppati. Salta i repo già tracciati
-(campo «Repo:» di un projects/*/STATE.md) e quelli già decisi (ignora, lavoro, non ora in corso). Non scrive
+(una riga «Repo:» di un projects/*/STATE.md) e quelli già decisi (ignora, lavoro, non ora in corso). Non scrive
 mai e non decide mai se un repo è di lavoro o personale. Le risposte si salvano con
 `repo-non-tracciato.py --registra` (una cartella alla volta, con --cwd).
 """

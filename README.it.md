@@ -129,7 +129,7 @@ Avvia `claude` nella cartella del vault e scrivi:
 
 | Comando | Cosa fa |
 |---|---|
-| `/nuovo-progetto <nome> [percorso]` | crea la cartella del progetto, il suo `STATE.md` e la riga in `projects/INDEX.md`; con un percorso scrive anche il campo `Repo:` |
+| `/nuovo-progetto <nome> [percorso]` | crea la cartella del progetto, il suo `STATE.md` e la riga in `projects/INDEX.md`; con un percorso scrive anche il campo `Repo:` (una riga per repo, per un progetto con più repo) |
 | `/morning` | il brief del mattino: progetti, novità, priorità |
 | `/chiudi-giornata` | riscrive gli STATE dai tuoi commit, lancia i controlli e committa in locale; non fa mai push |
 | `/weekly-review` | cosa è avanzato, cosa è fermo, cosa è trascurato |
@@ -169,7 +169,18 @@ Il modulo `scaffold` è facoltativo. Crea `scaffold/registro.md` (i template di 
 
 - `/adotta-repo` chiede dove cercare, elenca i repo git che il vault non conosce (quelli con lo stesso remote sono raggruppati) e registra la tua risposta per ciascuno: tracciarlo, ignorarlo, richiederlo tra 7 giorni, oppure «lavoro». Per un repo di lavoro si salva solo l'impronta del percorso, mai il percorso né il nome.
 - `scripts/repo-non-tracciato.py` dice se la cartella corrente è un repo git non tracciato. Non scrive mai da solo. Con l'hook di `scaffold/hook-avvio.md` Claude Code può ricordartelo quando apri un repo così. Quell'hook tocca le impostazioni globali `~/.claude`, quindi il wizard **non** lo installa: il file mostra le due righe da incollare e decidi tu.
-- Un repo è «tracciato» quando il suo percorso sta nel campo `Repo:` di un `projects/*/STATE.md`.
+- Un repo è «tracciato» quando il suo percorso sta in una riga `Repo:` di un `projects/*/STATE.md`.
+- Un progetto può comprendere più repo (per esempio backend, app e frontend): scrivi una riga `- **Repo:** <percorso>` per ogni repo, una sotto l'altra, un percorso assoluto per riga. `/chiudi-giornata`, l'avvio del mattino, `/weekly-review` e la dashboard leggono i commit di tutti, e nessuno risulta non tracciato. In `/adotta-repo` un «sì» può aggiungere il repo a un progetto che esiste già invece di crearne uno nuovo.
+
+  ```markdown
+  - **Repo:** /srv/codice/negozio/backend
+  - **Repo:** /srv/codice/negozio/app
+  - **Repo:** /srv/codice/negozio/frontend
+  ```
+
+## Agenti da remoto dal telefono (facoltativo)
+
+Con [Paseo](https://paseo.sh), un daemon open source con app iOS e Android, puoi avviare e seguire dal telefono agenti Claude Code sui tuoi progetti. Il second brain prepara il contesto e il prompt; tu avvii l'agente dall'app; la chiusura serale vede i suoi commit come sempre. Nel vault non cambia nulla. Leggi [docs/remote-agents-paseo.md](docs/remote-agents-paseo.md) (in inglese) **prima di installarlo**: le impostazioni predefinite di Paseo (nessuna password, strumenti di controllo degli agenti, aggiornamenti Windows non firmati) vanno irrobustite, e la guida elenca le impostazioni esatte per Windows, macOS e una VM Linux.
 
 ## Sistemi supportati
 
