@@ -126,7 +126,8 @@ def piano_systemd(nome, job, ctx):
                 "Environment=PATH=%s/.local/bin:/usr/local/bin:/usr/bin:/bin" % ctx["home"],
                 "StandardOutput=append:%s" % log, "StandardError=append:%s" % log]
     if job.get("service"):
-        servizio.append("Restart=on-failure")
+        # always, not on-failure: a clean exit (code 0) must also bring the service back, like launchd's KeepAlive.
+        servizio += ["Restart=always", "RestartSec=10"]
     file, avvia, ferma = [], [["systemctl", "--user", "daemon-reload"]], []
     if job.get("at_login") or job.get("service"):
         servizio += ["", "[Install]", "WantedBy=default.target"]
@@ -166,7 +167,10 @@ def piano_windows(nome, job, ctx):
                        "<ScheduleByWeek><DaysOfWeek>%s</DaysOfWeek><WeeksInterval>1</WeeksInterval></ScheduleByWeek></CalendarTrigger>" % (job["time"], giorno_xml))
     if job.get("at_login") or job.get("service"):
         # senza UserId vuol dire «all'accesso di qualsiasi utente», che chiede i diritti di amministratore
-        trigger.append("<LogonTrigger><Enabled>true</Enabled><UserId>%s</UserId></LogonTrigger>" % escape(utente_windows(ctx)))
+        # A service that exits with code 0 is not a "failure", so RestartOnFailure never revives it. Re-firing the
+        # logon trigger every 10 minutes acts as a watchdog: IgnoreNew skips the run while the service is still up.
+        ripeti = "<Repetition><Interval>PT10M</Interval></Repetition>" if job.get("service") else ""
+        trigger.append("<LogonTrigger>%s<Enabled>true</Enabled><UserId>%s</UserId></LogonTrigger>" % (ripeti, escape(utente_windows(ctx))))
     riavvio = "<RestartOnFailure><Interval>PT1M</Interval><Count>3</Count></RestartOnFailure>" if job.get("service") else ""
     xml = ('<?xml version="1.0" encoding="UTF-16"?>\n<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">'
            "<RegistrationInfo><Description>%s</Description></RegistrationInfo><Triggers>%s</Triggers>"

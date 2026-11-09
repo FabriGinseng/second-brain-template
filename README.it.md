@@ -99,7 +99,7 @@ Se un calendario non si legge, l'assistente non risponde sulle ore libere, invec
 
 ## La dashboard
 
-`python3 scripts/dashboard/server.py`, poi apri http://127.0.0.1:8765. Ascolta solo sul tuo computer. Il menu mostra le pagine dei moduli che hai scelto; una pagina che non hai scelto non c'è. `second-brain.dashboard` (vedi «Job pianificati») la tiene in esecuzione. Su Linux e Windows i pulsanti con lo stato dei job restano vuoti perché usano launchd.
+`python3 scripts/dashboard/server.py`, poi apri http://127.0.0.1:8765. Ascolta solo sul tuo computer. Il menu mostra le pagine dei moduli che hai scelto; una pagina che non hai scelto non c'è. `second-brain.dashboard` (vedi «Job pianificati») la tiene in esecuzione: se si ferma, anche senza errori, riparte da sola (KeepAlive di launchd, `Restart=always` di systemd, su Windows un controllo ogni 10 minuti). Su Linux e Windows i pulsanti con lo stato dei job restano vuoti perché usano launchd.
 
 ## Quando una pagina è vuota
 
@@ -174,6 +174,10 @@ Il modulo `scaffold` è facoltativo. Crea `scaffold/registro.md` (i template di 
   - **Repo:** /srv/codice/negozio/app
   - **Repo:** /srv/codice/negozio/frontend
   ```
+
+## Agenti da remoto dal telefono (facoltativo)
+
+Con [Paseo](https://paseo.sh), un daemon open source con app iOS e Android, puoi avviare e seguire dal telefono agenti Claude Code sui tuoi progetti. Il second brain prepara il contesto e il prompt; tu avvii l'agente dall'app; la chiusura serale vede i suoi commit come sempre. Nel vault non cambia nulla. Leggi [docs/remote-agents-paseo.md](docs/remote-agents-paseo.md) (in inglese) **prima di installarlo**: le impostazioni predefinite di Paseo (nessuna password, strumenti di controllo degli agenti, aggiornamenti Windows non firmati) vanno irrobustite, e la guida elenca le impostazioni esatte per Windows, macOS e una VM Linux.
 
 ## Sistemi supportati
 

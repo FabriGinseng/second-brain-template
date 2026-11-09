@@ -99,7 +99,7 @@ If a calendar cannot be read, the assistant does not answer about free hours ins
 
 ## The dashboard
 
-`python3 scripts/dashboard/server.py`, then open http://127.0.0.1:8765. It listens only on your computer. The menu shows the pages of the modules you chose; a page you did not choose is not there. `second-brain.dashboard` (see "Scheduled jobs") keeps it running. On Linux and Windows the job status buttons stay empty because they use launchd.
+`python3 scripts/dashboard/server.py`, then open http://127.0.0.1:8765. It listens only on your computer. The menu shows the pages of the modules you chose; a page you did not choose is not there. `second-brain.dashboard` (see "Scheduled jobs") keeps it running: if it stops, even cleanly, it comes back by itself (launchd KeepAlive, systemd `Restart=always`, on Windows a check every 10 minutes). On Linux and Windows the job status buttons stay empty because they use launchd.
 
 ## When a page is empty
 
@@ -174,6 +174,10 @@ The `scaffold` module is optional. It creates `scaffold/registro.md` (the projec
   - **Repo:** /srv/code/shop/app
   - **Repo:** /srv/code/shop/frontend
   ```
+
+## Remote agents from your phone (optional)
+
+You can start and follow Claude Code agents on your projects from a phone with [Paseo](https://paseo.sh), an open-source daemon with iOS and Android apps. The second brain prepares the context and the prompt; you start the agent from the app; the evening close sees its commits as usual. Nothing in the vault changes. Read [docs/remote-agents-paseo.md](docs/remote-agents-paseo.md) **before installing**: Paseo's defaults (no password, agent-control tools, unsigned Windows updates) need hardening, and the guide lists the exact settings for Windows, macOS and a Linux VM.
 
 ## Platform support
 

@@ -66,7 +66,7 @@ class SystemdTest(unittest.TestCase):
     def test_servizio_senza_timer_e_domenica(self):
         s = ij.piano_systemd("s", SERVIZIO, CTX_POSIX)
         self.assertEqual([n for n, _ in s["file"]], ["second-brain.s.service"])
-        self.assertIn("Restart=on-failure", s["file"][0][1])
+        self.assertIn("Restart=always", s["file"][0][1])  # also after a clean exit, like launchd KeepAlive
         self.assertIn("OnCalendar=Sun 23:00:00", dict(ij.piano_systemd("w", DOMENICA, CTX_POSIX)["file"])["second-brain.w.timer"])
 
 
@@ -118,6 +118,13 @@ class WindowsTest(unittest.TestCase):
         testo, _ = self.xml(SERVIZIO)
         self.assertIn("<RestartOnFailure>", testo)
         self.assertIn("<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>", testo)
+
+    def test_servizio_uscito_con_zero_riparte_entro_10_minuti(self):
+        """Regressione: la dashboard è uscita con codice 0, RestartOnFailure non scatta e restava spenta."""
+        testo, _ = self.xml(SERVIZIO)
+        self.assertIn("<LogonTrigger><Repetition><Interval>PT10M</Interval></Repetition><Enabled>true</Enabled>", testo)
+        self.assertIn("<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>", testo)  # se è viva il giro si salta
+        self.assertNotIn("<Repetition>", self.xml(FERIALE)[0])  # i job normali non si ripetono
 
 
 class ComandoTest(unittest.TestCase):
