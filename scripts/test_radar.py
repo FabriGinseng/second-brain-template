@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 
 spec = importlib.util.spec_from_file_location("radar", Path(__file__).resolve().parent / "radar.py")
@@ -36,6 +37,26 @@ class Radar(unittest.TestCase):
 
     def test_senza_inbox_salta(self):
         radar.radar(self.v, self.lancia)
+        self.assertEqual(self.chiamate, [])
+
+    def test_senza_inbox_della_settimana_raccoglie_il_feed(self):
+        (self.v / "memory").mkdir()
+        (self.v / "memory" / "feeds.md").write_text("https://esempio.it/feed\n")
+        self.file("inbox/2026-11-02-novita.md", 100)  # la settimana scorsa
+        self.file("radar/2026-11-02.md", 200)
+        radar.radar(self.v, self.lancia, date(2026, 11, 9))  # lunedì
+        self.assertEqual(self.chiamate, [("scripts/feed.py",)])
+
+    def test_con_inbox_della_settimana_o_senza_feeds_non_raccoglie(self):
+        self.file("inbox/2026-11-09-novita.md", 100)
+        self.file("radar/2026-11-09.md", 200)
+        (self.v / "memory").mkdir()
+        (self.v / "memory" / "feeds.md").write_text("https://esempio.it/feed\n")
+        radar.radar(self.v, self.lancia, date(2026, 11, 11))  # mercoledì, inbox di lunedì
+        self.assertEqual(self.chiamate, [])
+        (self.v / "memory" / "feeds.md").unlink()
+        (self.v / "inbox" / "2026-11-09-novita.md").unlink()
+        radar.radar(self.v, self.lancia, date(2026, 11, 11))  # niente indirizzi: la raccolta resta a n8n
         self.assertEqual(self.chiamate, [])
 
     def test_inbox_gia_elaborata_salta(self):

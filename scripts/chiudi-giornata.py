@@ -32,6 +32,13 @@ def _lock(lock):
         return False
 
 
+CARTELLE_AUTONOME = ("projects", "daily", "radar", "inbox", "content")
+
+
+def cartelle(vault):
+    return [c for c in CARTELLE_AUTONOME if (Path(vault) / c).is_dir()]
+
+
 def chiudi(vault=VAULT, log=LOGS / "second-brain-chiudi.log", lock=LOGS / "second-brain-chiudi.lock",
            run=subprocess.run, adesso=None, segnala=avviso.segnala):
     adesso = adesso or datetime.now()
@@ -42,7 +49,8 @@ def chiudi(vault=VAULT, log=LOGS / "second-brain-chiudi.log", lock=LOGS / "secon
             f.write(riga + "\n")
 
     def sporco():
-        return run(["git", "status", "--porcelain"], cwd=vault, capture_output=True, text=True, encoding="utf-8").stdout.strip()
+        # Conta solo ciò che la chiusura può committare: un file di lavoro in research_notes/ non la fa partire a vuoto.
+        return run(["git", "status", "--porcelain", "--", *cartelle(vault)], cwd=vault, capture_output=True, text=True, encoding="utf-8").stdout.strip()
 
     if not _lock(lock):
         scrivi(f"{adesso:%F %T} chiusura già in corso: salto")
@@ -73,8 +81,15 @@ def chiudi(vault=VAULT, log=LOGS / "second-brain-chiudi.log", lock=LOGS / "secon
 
         with open(log, "a", encoding="utf-8") as f:
             ok = run([sys.executable, "-I", "scripts/verify"], cwd=vault, stdout=f, stderr=subprocess.STDOUT).returncode == 0
-        if ok:
-            run(["git", "add", "-A"], cwd=vault)
+        # `git commit` senza percorsi committa l'intero indice: un file messo in stage a mano (e rimasto lì perché il pre-commit
+        # l'ha rifiutato) finirebbe nel commit «chiusura». Meglio fermarsi e dirlo che committare altro.
+        in_stage = run(["git", "diff", "--cached", "--name-only", "-z"], cwd=vault, capture_output=True, text=True, encoding="utf-8").stdout.split("\0") if ok else []
+        fuori = [f for f in in_stage if f and not f.startswith(tuple(c + "/" for c in CARTELLE_AUTONOME))]
+        if ok and fuori:
+            scrivi("file già in stage fuori dalle cartelle autonome (%s): nessun commit, il lavoro resta non committato" % ", ".join(fuori[:5]))
+        elif ok:
+            # Solo le cartelle dove si scrive in autonomia (ADR-004): il resto lo committa chi l'ha scritto.
+            run(["git", "add", "--", *cartelle(vault)], cwd=vault)
             with open(log, "a", encoding="utf-8") as f:  # l'hook pre-commit può rifiutare (gitleaks): il motivo resta nel log
                 rc = run(["git", "commit", "-q", "-m", f"chiusura {oggi}", "-m", "Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"],
                          cwd=vault, stdout=f, stderr=subprocess.STDOUT).returncode

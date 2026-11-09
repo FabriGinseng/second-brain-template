@@ -60,6 +60,12 @@ class RepoNonTracciatoTest(unittest.TestCase):
         self.assertIn(str(self.repo), out)
         self.assertLessEqual(len(out.splitlines()), 3)
 
+    def test_il_si_rimanda_al_file_del_comando_perche_fuori_dal_vault_non_esiste(self):
+        # /nuovo-progetto è un comando del vault: in una sessione aperta altrove dà «Unknown skill».
+        out = self.msg()
+        self.assertIn(str(rnt.VAULT / ".claude" / "commands" / "nuovo-progetto.md"), out)
+        self.assertNotIn("usa /nuovo-progetto", out)
+
     def test_fuori_da_un_repo_git_tace(self):
         fuori = self.base / "cartella-semplice"
         fuori.mkdir()

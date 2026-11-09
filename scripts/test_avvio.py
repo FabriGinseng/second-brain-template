@@ -53,6 +53,20 @@ class Avvio(unittest.TestCase):
         self.assertEqual(out.splitlines(), ["niente da chiudere", "brief di oggi già presente: non lo rigenero"])
         self.assertEqual(self.nomi(), ["aggiorna-oggi.py", "git", "attivita-progetti.py"])
 
+    def test_radar_della_settimana_mancante_si_lancia(self):
+        (self.v / "memory").mkdir()
+        (self.v / "memory" / "feeds.md").write_text("https://esempio.it/feed\n")
+        (self.v / "radar").mkdir()
+        (self.v / "radar" / "2026-10-27.md").write_text("x")  # la settimana scorsa (oggi è martedì 2026-11-03)
+        (self.v / "daily" / "2026-11-03.md").write_text("x")
+        rc, out = self.vai()
+        self.assertIn("radar di questa settimana assente: lo lancio", out)
+        self.assertIn("radar.py", self.nomi())
+        (self.v / "radar" / "2026-11-02.md").write_text("x")  # ora c'è
+        self.chiamate.clear()
+        self.vai()
+        self.assertNotIn("radar.py", self.nomi())
+
     def test_dry_run_decide_ma_non_esegue(self):
         self.pending, self.nuovi = " M x", "fse: 2 commit"
         rc, out = self.vai(dry=True)

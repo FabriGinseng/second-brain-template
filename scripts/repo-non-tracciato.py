@@ -93,8 +93,8 @@ def messaggio(cwd, vault, oggi, escludi=None, casa=None):
         return ""
     return (f"Il repo «{repo.name}» ({repo}) non è nel second brain.\n"
             f"Chiedi all'utente, una volta, se tracciarlo: sì, non ora, ignora o lavoro. Salva la risposta con "
-            f"`python3 {Path(__file__).resolve()} --registra ignora|non-ora|lavoro` (per «sì» usa `/nuovo-progetto <nome> {repo}`, "
-            f"o aggiungi `- **Repo:** {repo}` sotto le righe Repo dello STATE di un progetto esistente).")
+            f"`python3 {Path(__file__).resolve()} --registra ignora|non-ora|lavoro` (per «sì» il comando /nuovo-progetto esiste solo dentro il vault: leggi `{VAULT / '.claude' / 'commands' / 'nuovo-progetto.md'}` "
+            f"e segui i suoi passi con il percorso {repo}, oppure aggiungi `- **Repo:** {repo}` sotto le righe Repo dello STATE di un progetto esistente).")
 
 
 def registra(repo, vault, scelta, oggi):

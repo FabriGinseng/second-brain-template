@@ -4,6 +4,7 @@ lancia scripts/verify e committa in locale solo se passa. Non pubblica niente e 
 Con --forza prepara anche se questa settimana (lunedì-domenica, ISO) l'ha già fatto.
 """
 import json
+import os
 import subprocess
 import sys
 import time
@@ -72,7 +73,8 @@ def bozze(forza=False, vault=VAULT, log=LOGS / "second-brain-bozze.log", lock=LO
                                stdout=subprocess.PIPE, stderr=f, text=True, encoding="utf-8").stdout.rstrip("\n")
             prompt = f"/bozze-settimana\nAttività dei repo degli ultimi sette giorni:\n{attivita or 'nessuna'}"
             r = run(["claude", "--permission-mode", "dontAsk", "--allowedTools", "Read", "Write", "Glob", "Grep", "-p", prompt],
-                    cwd=vault, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8")
+                    cwd=vault, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                    env={**os.environ, "SB_NO_STOP_VERIFY": "1"})  # lo Stop hook non deve rimandare indietro una run non presidiata
             with open(log, "a", encoding="utf-8") as f:
                 f.write(r.stdout or "")
             if avviso.non_autenticato(r.stdout):
