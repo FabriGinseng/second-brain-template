@@ -9,6 +9,7 @@ import datetime
 import json
 import pathlib
 import re
+import subprocess
 import sys
 
 MAX_STATE_LINES = 20  # righe non vuote
@@ -154,6 +155,68 @@ def check_readme(root, problems):
             problems.append(f'README.md: non cita il comando /{comando.stem}')
 
 
+SCRIPT_CITATO = re.compile(r'`((?:scripts/)?[\w.-]+(?:/[\w.-]+)*\.(?:sh|py))`|`(scripts/[\w.-]+(?:/[\w.-]+)*)`')
+
+
+def check_riferimenti_script(root, problems):
+    """CLAUDE.md non deve citare uno script che non esiste: `scripts/x` esiste come percorso, `x.py` o `x.sh` esiste sotto scripts/.
+
+    I pattern con * o <> (scripts/test_*.py) non sono percorsi e si saltano. Senza CLAUDE.md o senza cartella scripts/ non c'è nulla da controllare.
+    """
+    claude, scripts = root / 'CLAUDE.md', root / 'scripts'
+    if not claude.is_file() or not scripts.is_dir():
+        return
+    visti = set()
+    for m in SCRIPT_CITATO.finditer(read(claude)):
+        voce = m.group(1) or m.group(2)
+        if voce in visti:
+            continue
+        visti.add(voce)
+        esiste = (root / voce).exists() if voce.startswith('scripts/') else any(scripts.rglob(voce))
+        if not esiste:
+            problems.append(f'CLAUDE.md: {voce} non esiste')
+
+
+ADR_CITATO = re.compile(r'ADR-\d{3}')
+ADR_FILE = re.compile(r'^ADR-\d{3}')
+# Il prodotto, non specifiche, report o test: i file alla radice, le cartelle elencate e gli script .py alla radice (setup.py, install_jobs.py)
+ADR_FILE_RADICE = ('README.md', 'README.it.md', 'CLAUDE.md', 'GLOSSARY.md', 'SECURITY.md', 'INIZIA.md', 'GETTING_STARTED.md', 'CHANGELOG.md')
+ADR_CARTELLE = ('scripts', '.claude', 'docs/adr', 'templates')
+
+
+def _file_del_prodotto(root):
+    """Percorsi relativi (con /) da controllare. In un repo git solo i file tracciati: un worktree di un agente, un ramo o una skill di altri,
+    ignorati da git, non devono bloccare verify (e con lui il commit della chiusura). Senza git, tutto tranne i worktree."""
+    r = subprocess.run(['git', '-C', str(root), '-c', 'core.quotePath=false', 'ls-files', '-z'], capture_output=True)
+    if r.returncode == 0 and (root / '.git').exists():
+        candidati = [f for f in r.stdout.decode('utf-8', 'replace').split('\0') if f]
+    else:
+        candidati = [f.relative_to(root).as_posix() for f in root.rglob('*') if f.is_file()]
+    for f in candidati:
+        parti = f.split('/')
+        if parti[-1].startswith('test_') or '__pycache__' in parti or 'worktrees' in parti or f.rsplit('.', 1)[-1] in ('pyc', 'png', 'jpg'):
+            continue
+        if f in ADR_FILE_RADICE or (len(parti) == 1 and f.endswith('.py')) or any(f.startswith(c + '/') for c in ADR_CARTELLE):
+            yield f
+
+
+def check_adr_citati(root, problems):
+    """Ogni ADR-NNN citato nel prodotto deve avere un file in docs/adr/. Senza docs/adr/ non c'è niente da controllare.
+
+    Nel template pubblico citava ADR-001 e ADR-005, che lì non c'erano: riferimenti vuoti per chi lo usa.
+    """
+    cartella = root / 'docs' / 'adr'
+    if not cartella.is_dir():
+        return
+    esistenti = {m.group(0) for f in cartella.glob('ADR-*.md') if (m := ADR_FILE.match(f.name))}
+    for rel in _file_del_prodotto(root):
+        visti = set()
+        for m in ADR_CITATO.finditer(read(root / rel)):
+            if m.group(0) not in esistenti and m.group(0) not in visti:
+                visti.add(m.group(0))
+                problems.append(f'{rel}: {m.group(0)} non esiste')
+
+
 def check_scaffold(root, problems):
     """Se esiste scaffold/registro.md ne controlla le righe e i file dei profili.
 
@@ -206,6 +269,8 @@ def main(argv):
     check_projects(root, problems)
     check_wikilinks(root, problems)
     check_readme(root, problems)
+    check_riferimenti_script(root, problems)
+    check_adr_citati(root, problems)
     check_scaffold(root, problems)
     for problem in problems:
         print(problem)

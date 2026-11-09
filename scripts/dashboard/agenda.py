@@ -56,6 +56,9 @@ def scrivi_config(file, nomi):
     return True
 
 
+ARRETRATO_DOPO_GIORNI = 2
+
+
 def _ora(d):
     return d.strftime("%H:%M")
 
@@ -91,7 +94,9 @@ def unisci(eventi, scadenze, adesso, giorni=7, config=None):
             continue
         voce = dict(s)
         voce.update({"giorno": (oggi if ritardo else giorno).isoformat(), "originale": giorno.isoformat(), "ora": data[11:16] if len(data) >= 16 else "",
-                     "fine": "", "titolo": s["testo"], "dettaglio": "", "lavoro": False, "inRitardo": ritardo, "inCorso": False, "tuttoIlGiorno": len(data) < 16})
+                     "fine": "", "titolo": s["testo"], "dettaglio": "", "lavoro": False, "inRitardo": ritardo, "inCorso": False, "tuttoIlGiorno": len(data) < 16,
+                     # un post scaduto da più di due giorni è un arretrato: il rosso resta per ciò che chiede una decisione oggi
+                     "arretrato": ritardo and s.get("fonte") == "post" and (oggi - giorno).days > ARRETRATO_DOPO_GIORNI})
         voci.append(voce)
-    voci.sort(key=lambda v: (not v["inRitardo"], v["giorno"], v["ora"] == "", v["ora"], v["titolo"]))
+    voci.sort(key=lambda v: (not v["inRitardo"], v.get("arretrato", False), v["giorno"], v["ora"] == "", v["ora"], v["titolo"]))
     return voci

@@ -35,6 +35,24 @@ class SelezioneTest(unittest.TestCase):
         self.assertEqual(list(ij.seleziona(self.JOBS, "linux", solo=["c"])), [])  # ma non su un sistema sbagliato
 
 
+class LogDeiJobTest(unittest.TestCase):
+    """La dashboard giudica un job dal suo log: deve essere il file in cui lo script scrive, non uno con il nome del job."""
+
+    def test_un_job_con_chiave_log_scrive_li_e_gli_altri_nel_file_del_loro_nome(self):
+        job = {**FERIALE, "log": "chiudi"}
+        self.assertTrue(plistlib.loads(ij.piano_launchd("chiusura", job, CTX)["file"][0][1])["StandardOutPath"].endswith("second-brain-chiudi.log"))
+        self.assertTrue(plistlib.loads(ij.piano_launchd("m", FERIALE, CTX)["file"][0][1])["StandardOutPath"].endswith("second-brain-m.log"))
+        self.assertIn("second-brain-chiudi.log", dict(ij.piano_systemd("chiusura", job, CTX_POSIX)["file"])["second-brain.chiusura.service"])
+        self.assertIn("second-brain-chiudi.log", ij.piano_windows("chiusura", job, CTX)["file"][0][1].decode("utf-16"))
+
+    def test_chiusura_del_template_scrive_nel_log_dello_script(self):
+        jobs = json.loads((RADICE / "scripts" / "jobs.json").read_text(encoding="utf-8"))
+        if not (RADICE / "scripts" / "chiudi-giornata.py").is_file():
+            self.skipTest("lo script sta nel vault, non nell'overlay: il test gira sul template costruito")
+        script = (RADICE / "scripts" / "chiudi-giornata.py").read_text(encoding="utf-8")
+        self.assertIn("second-brain-%s.log" % jobs["chiusura"]["log"], script)
+
+
 class LaunchdTest(unittest.TestCase):
     def test_giorni_orario_login_e_caffeinate(self):
         p = ij.piano_launchd("m", FERIALE, CTX)

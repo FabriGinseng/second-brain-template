@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -45,6 +46,7 @@ modello_modulo = _modulo(HERE.parent / "modello.py")
 percorsi = _modulo(HERE.parent / "percorsi.py")
 calendario_modulo = _modulo(HERE.parent / "calendario.py")
 BLOCCO_RICHIESTE = threading.Lock()  # una scrittura alla volta sul file delle richieste
+BLOCCO_PIANO = threading.Lock()  # lettura, modifica e scrittura di piano.md e scadenze.md: due clic veloci sono due thread
 BLOCCO_CONFIG = threading.Lock()  # un solo cambio alla volta ai file globali di Claude
 PORTA = 8765
 HOST_OK = {"127.0.0.1:%d" % PORTA, "localhost:%d" % PORTA}
@@ -286,7 +288,7 @@ def jobs_pianificati(vault=VAULT):
         return {}
     out = {}
     for nome, j in jobs.items():
-        voce = {"Label": "%s.%s" % (etichetta, nome), "StandardOutPath": str(percorsi.cartella_log() / ("second-brain-%s.log" % nome))}
+        voce = {"Label": "%s.%s" % (etichetta, nome), "StandardOutPath": str(percorsi.cartella_log() / ("second-brain-%s.log" % j.get("log", nome)))}
         if j.get("time") and j.get("days"):
             ora, minuto = (int(x) for x in j["time"].split(":"))
             voce["StartCalendarInterval"] = [{"Weekday": g % 7, "Hour": ora, "Minute": minuto} for g in sorted(j["days"])]
@@ -526,21 +528,31 @@ def imposta_fatto(fonte, data, testo, fatto, cartella=None):
     if fonte not in FILE_SPUNTE:
         raise ValueError(fonte)
     file = (cartella or VAULT / "docs") / FILE_SPUNTE[fonte]
-    righe = file.read_text(encoding="utf-8").splitlines(keepends=True)
-    trovate = []
-    for i, riga in enumerate(righe):
-        v = VOCE_PIANO.match(riga.rstrip("\r\n"))
-        if not v:
-            continue
-        d = DATA_PIANO.match(v.group(2))
-        if (d.group(1) if d else None) == data and (d.group(2) if d else v.group(2)) == testo:
-            trovate.append(i)
-    if not trovate:
-        raise LookupError(testo)
-    if len(trovate) > 1:
-        raise RuntimeError(testo)
-    righe[trovate[0]] = "- [%s]%s" % ("x" if fatto else " ", righe[trovate[0]][5:])
-    file.write_text("".join(righe), encoding="utf-8")
+    with BLOCCO_PIANO:  # senza, due spunte insieme si cancellano a vicenda (o cancellano il file temporaneo dell'altra)
+        righe = file.read_text(encoding="utf-8").splitlines(keepends=True)
+        trovate = []
+        for i, riga in enumerate(righe):
+            v = VOCE_PIANO.match(riga.rstrip("\r\n"))
+            if not v:
+                continue
+            d = DATA_PIANO.match(v.group(2))
+            if (d.group(1) if d else None) == data and (d.group(2) if d else v.group(2)) == testo:
+                trovate.append(i)
+        if not trovate:
+            raise LookupError(testo)
+        if len(trovate) > 1:
+            raise RuntimeError(testo)
+        righe[trovate[0]] = "- [%s]%s" % ("x" if fatto else " ", righe[trovate[0]][5:])
+        # Scrittura atomica: un file temporaneo per chiamata e os.replace, così un errore a metà non lascia un piano troncato.
+        fd, nome_tmp = tempfile.mkstemp(dir=str(file.parent), suffix=".tmp")
+        tmp = Path(nome_tmp)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write("".join(righe))
+            os.chmod(tmp, file.stat().st_mode & 0o777)  # mkstemp crea 0600: il piano resta leggibile come prima
+            os.replace(tmp, file)
+        finally:
+            tmp.unlink(missing_ok=True)
 
 
 def _momento(data):
@@ -603,6 +615,20 @@ def moduli_attivi(vault=VAULT):
     return {m: bool(isinstance(scelti.get(m), dict) and scelti[m].get("attivo")) for m in MODULI_NOTI}
 
 
+def modello_assistente(vault=VAULT):
+    """{nome, locale} del modello scelto per l'assistente in config.json: la pagina lo scrive così com'è, senza dare per scontato che sia locale.
+    locale è None se nessun modello è scelto (o la scelta non è valida)."""
+    try:
+        provider, nome = modello_modulo.scelta("assistente", vault)
+    except (ValueError, modello_modulo.ModelloNonDisponibile):
+        return {"nome": "nessuno", "locale": None}
+    if provider == "ollama":
+        return {"nome": nome, "locale": True}
+    if provider == "claude":
+        return {"nome": "Claude", "locale": False}
+    return {"nome": "nessuno", "locale": None}
+
+
 def calendario_al_modello(vault=VAULT):
     """Vero se l'assistente può ricevere gli appuntamenti. Con un modello locale sì; con Claude solo se l'hai permesso al setup
     (config.json, moduli.assistente.calendario_al_cloud): senza il consenso i titoli non lasciano il computer."""
@@ -643,11 +669,13 @@ def prestazioni():
 
 AZIONI = {"morning": "scripts/morning.py", "chiudi-giornata": "scripts/chiudi-giornata.py",
           "controllo-skill": "scripts/controllo-skill.py", "radar": "scripts/radar.py",
-          "pulizia": "scripts/pulizia-settimanale.py", "bozze": "scripts/prepara-bozze.py"}
+          "pulizia": "scripts/pulizia-settimanale.py", "bozze": "scripts/prepara-bozze.py",
+          "richieste": "scripts/elabora-richieste.py"}
 LOG_AZIONI = {"morning": "second-brain-morning.log", "chiudi-giornata": "second-brain-chiudi.log",
               "controllo-skill": "second-brain-skill.log", "radar": "second-brain-radar.log",
-              "pulizia": "second-brain-pulizia.log", "bozze": "second-brain-bozze.log"}
+              "pulizia": "second-brain-pulizia.log", "bozze": "second-brain-bozze.log", "richieste": "second-brain-richieste.log"}
 PROCESSI = {}  # azione -> processo avviato dalla dashboard
+INIZI = {}  # azione -> quando la dashboard l'ha avviata (serve a decidere se il suo esito è più recente di quello di launchd)
 
 
 def ambiente_azione():
@@ -665,6 +693,7 @@ def avvia(nome, esegui=subprocess.Popen):
     with open(percorsi.cartella_log() / LOG_AZIONI[nome], "ab") as log:
         script = str(VAULT / AZIONI[nome])
         comando = [sys.executable, "-I", script] if script.endswith(".py") else ["/bin/bash", script]
+        INIZI[nome] = datetime.now()
         PROCESSI[nome] = esegui(comando, cwd=str(VAULT), stdout=log,
                                 stderr=subprocess.STDOUT, env=ambiente_azione(), start_new_session=True)
     return {"avviato": nome}
@@ -804,10 +833,15 @@ def post_calendari():
 
 
 def post_richieste_aperte():
-    """Quante richieste di post sono nuove o in lavorazione, in tutti i calendari: il numero sul menu."""
+    """Quante bozze aspettano la tua approvazione, in tutti i calendari: il numero sul menu Post."""
     progetti = _progetti_con_repo()
-    return sum(richieste_modulo.aperte(richieste_modulo.file_di(VAULT / "projects", c["progetto"], c["canale"]), c["progetto"], c["canale"])
-               for c in post_modulo.scopri(VAULT / "projects", progetti))
+    out = 0
+    for c in post_modulo.scopri(VAULT / "projects", progetti):
+        try:
+            out += sum(1 for v in post_modulo.carica(c["file"]).get("voci", []) if v.get("stato") == "da approvare")
+        except (OSError, ValueError):
+            pass
+    return out
 
 
 def post_trova(progetto, canale):
@@ -887,6 +921,38 @@ def aspetta(adesso=None):
             "novita": {"data": rapporto["data"] if rapporto else None, "daLeggere": (rapporto["daLeggere"] if rapporto else [])[:3]}}
 
 
+def _plurale(n, uno, molti):
+    return "%d %s" % (n, uno if n == 1 else molti)
+
+
+def voci_attesa(bozze_rete, controllo_skill, avvii_dati):
+    """«Aspetta te»: ciò che chiede una decisione adesso, in ordine di urgenza. Ogni voce porta alla pagina dove decidere (`link`).
+
+    Job non riusciti (fallito, mancato, mai partito), aggiornamenti di skill già scansionati (stato «nuova»), bozze da pubblicare.
+    Un job «saltato» (ha girato e non c'era nulla da fare) o in ritardo non è un problema da decidere."""
+    voci = []
+    job = [j for j in avvii_dati.get("job", []) if isinstance(j, dict) and j.get("stato") in ("fallito", "mancato", "mai")]
+    for j in job:
+        voci.append({"tipo": "job_fallito", "testo": "%s: %s" % (j.get("nome", "?"), j.get("motivo", "")), "link": "avvii"})
+    # Senza controllo (nessun file, illeggibile, forma inattesa) il dato manca: None, non «0 skill da aggiornare»
+    elenco = controllo_skill.get("skill") if isinstance(controllo_skill, dict) else None
+    skill = [s for s in elenco if isinstance(s, dict) and s.get("stato") == "nuova"] if isinstance(elenco, list) else None
+    if skill:
+        voci.append({"tipo": "skill_da_aggiornare", "testo": _plurale(len(skill), "aggiornamento di skill", "aggiornamenti di skill"), "link": "configurazione"})
+    bozze = [b for lista in bozze_rete.values() if isinstance(lista, list) for b in lista if isinstance(b, dict) and b.get("stato") == "da pubblicare"]
+    if bozze:
+        voci.append({"tipo": "bozza_da_pubblicare", "testo": _plurale(len(bozze), "bozza da pubblicare", "bozze da pubblicare"), "link": "post"})
+    n = len(voci)
+    fatto = "Niente aspetta te." if not n else "Una cosa aspetta te." if n == 1 else "%d cose aspettano te." % n
+    return {"voci": voci, "fatto": fatto, "conteggi": {"job": len(job), "skill": None if skill is None else len(skill), "bozze": len(bozze)}}
+
+
+def attesa():
+    # Le bozze si contano solo se il modulo è attivo: «Apri» porterebbe a una pagina che il modulo nasconde.
+    bozze = bozze_per_rete() if moduli_attivi().get("bozze") else {}
+    return voci_attesa(bozze, ultimo_controllo_skill(), avvii())
+
+
 def servizi_dati(adesso=None):
     """I servizi di ogni progetto con proiezione, verdetti, spesa mensile e costo del passaggio ai piani a pagamento."""
     oggi = (adesso or datetime.now()).date()
@@ -909,8 +975,11 @@ def servizi_dati(adesso=None):
 
 def avvii():
     vivi = [n for n, p in PROCESSI.items() if p.poll() is None]
-    return avvii_modulo.avvii(datetime.now(), jobs_pianificati(VAULT), percorsi.cartella_log(),
-                              in_corso=vivi, acceso=avvii_modulo.avvio_mac(), azioni=AZIONI)
+    jobs = jobs_pianificati(VAULT)
+    esiti = {n: avvii_modulo.ultimo_exit(p["Label"]) for n, p in jobs.items() if n in avvii_modulo.JOB_PIANIFICATI and p.get("Label")}
+    a_mano = {n: (INIZI[n], p.poll()) for n, p in PROCESSI.items() if n in INIZI and p.poll() is not None}
+    return avvii_modulo.avvii(datetime.now(), jobs, percorsi.cartella_log(),
+                              in_corso=vivi, acceso=avvii_modulo.avvio_mac(), azioni=AZIONI, esiti=esiti, giri_a_mano=a_mano)
 
 
 BOZZE = VAULT / "content" / "linkedin"
@@ -971,6 +1040,28 @@ def immagine_bozza(nome, cartella=BOZZE):
     return None
 
 
+# Rotte GET che rispondono con JSON: percorso -> funzione senza argomenti (lambda: i test possono sostituire le funzioni del modulo)
+ROTTE_JSON = {
+    "/api/stato": lambda: stato(),
+    "/api/piano": lambda: piano(),
+    "/api/oggi": lambda: oggi(datetime.now()),
+    "/api/attesa": lambda: attesa(),
+    "/api/moduli": lambda: {**moduli_attivi(), "modello": modello_assistente()},
+    "/api/configurazione": lambda: configurazione_dati(),
+    "/api/prestazioni": lambda: prestazioni(),
+    "/api/esecuzioni": lambda: esecuzioni(),
+    "/api/servizi": lambda: servizi_dati(),
+    "/api/aspetta": lambda: aspetta(),
+    "/api/post/aperte": lambda: {"aperte": post_richieste_aperte()},
+    "/api/post": lambda: post_calendari(),
+    "/api/avvii": lambda: avvii(),
+    "/api/bozze": lambda: bozze_per_rete(),
+}
+# Le sole risorse statiche servite: il nome non viene mai dal percorso della richiesta
+STATICI = {"/dashboard.js": ("dashboard.js", "text/javascript; charset=utf-8"),
+           "/dashboard.css": ("dashboard.css", "text/css; charset=utf-8")}
+
+
 class Gestore(BaseHTTPRequestHandler):
     def do_POST(self):
         # Un sito aperto nel browser non può mandare X-Azione: la richiesta con questo header richiede una preflight
@@ -1017,12 +1108,11 @@ class Gestore(BaseHTTPRequestHandler):
         except RuntimeError:
             self.send_error(409)
             return
-        self._invia(json.dumps(esito).encode("utf-8"), "application/json; charset=utf-8")
+        self._json(esito)
 
     def _spunta(self):
         try:
-            lunghezza = int(self.headers.get("Content-Length", ""))
-            corpo = json.loads(self.rfile.read(lunghezza)) if 0 < lunghezza <= 4096 else None
+            corpo = self._corpo_json()
             fonte, data, testo, fatto = corpo["fonte"], corpo.get("data"), corpo["testo"], corpo["fatto"]
             valido = isinstance(fatto, bool) and isinstance(fonte, str) and isinstance(testo, str) and (data is None or isinstance(data, str))
         except (ValueError, KeyError, TypeError, AttributeError):
@@ -1041,12 +1131,14 @@ class Gestore(BaseHTTPRequestHandler):
         except RuntimeError:
             self.send_error(409)
             return
-        self._invia(json.dumps({"fatto": fatto}).encode("utf-8"), "application/json; charset=utf-8")
+        except OSError:
+            self.send_error(500)
+            return
+        self._json({"fatto": fatto})
 
     def _vota(self):
         try:
-            lunghezza = int(self.headers.get("Content-Length", ""))
-            corpo = json.loads(self.rfile.read(lunghezza)) if 0 < lunghezza <= 4096 else None
+            corpo = self._corpo_json()
             titolo, giudizio = corpo["titolo"], corpo["giudizio"]
             valido = isinstance(titolo, str) and isinstance(giudizio, str)
         except (ValueError, KeyError, TypeError, AttributeError):
@@ -1062,7 +1154,7 @@ class Gestore(BaseHTTPRequestHandler):
         except LookupError:
             self.send_error(404)
             return
-        self._invia(json.dumps({"giudizio": giudizio}).encode("utf-8"), "application/json; charset=utf-8")
+        self._json({"giudizio": giudizio})
 
     def _post_scarica(self, percorso):
         """Una immagine (/scarica/<progetto>/<canale>/<id>/<n>, n da 1) o tutte in uno ZIP (/zip/<progetto>/<canale>/<id>)."""
@@ -1121,15 +1213,15 @@ class Gestore(BaseHTTPRequestHandler):
                         CALENDARIO["eventi"] = [e for e in CALENDARIO["eventi"] if e.get("uid") != uid]
                 esito = {"tolto": True}
         except ValueError as e:
-            self._invia(json.dumps({"errore": str(e)}, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8", 400)
+            self._json({"errore": str(e)}, 400)
             return
         except LookupError as e:
-            self._invia(json.dumps({"errore": str(e)}, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8", 404)
+            self._json({"errore": str(e)}, 404)
             return
         except (RuntimeError, subprocess.TimeoutExpired) as e:
-            self._invia(json.dumps({"errore": "il Calendario non ha risposto: %s" % e}, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8", 502)
+            self._json({"errore": "il Calendario non ha risposto: %s" % e}, 502)
             return
-        self._invia(json.dumps(esito, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
+        self._json(esito)
 
     def _assistente_chiedi(self):
         domanda = (self._corpo_json(2048) or {}).get("domanda")
@@ -1149,7 +1241,7 @@ class Gestore(BaseHTTPRequestHandler):
                          "calendario": dati["calendario"]}
             except RuntimeError as e:
                 esito = {"pronto": False, "risposta": str(e)}
-        self._invia(json.dumps(esito, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
+        self._json(esito)
 
     def _servizi_misura(self):
         corpo = self._corpo_json()
@@ -1170,7 +1262,7 @@ class Gestore(BaseHTTPRequestHandler):
         except LookupError:
             self.send_error(404)
             return
-        self._invia(json.dumps({"ok": True}).encode("utf-8"), "application/json; charset=utf-8")
+        self._json({"ok": True})
 
     def _post_richiesta(self, annulla):
         corpo = self._corpo_json(8192)
@@ -1191,13 +1283,17 @@ class Gestore(BaseHTTPRequestHandler):
                 else:
                     ids = {v.get("id") for v in post_modulo.carica(file).get("voci", [])}
                     r = richieste_modulo.aggiungi(percorso_richieste, progetto, canale, corpo, ids, datetime.now())
+                    try:
+                        avvia("richieste")  # se è già in corso, riprende lui anche questa
+                    except RuntimeError:
+                        pass
         except ValueError:
             self.send_error(400)
             return
         except LookupError:
             self.send_error(404)
             return
-        self._invia(json.dumps(r, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
+        self._json(r)
 
     def _bozza_stato(self):
         corpo = self._corpo_json() or {}
@@ -1206,7 +1302,7 @@ class Gestore(BaseHTTPRequestHandler):
         except ValueError:
             self.send_error(400)
             return
-        self._invia(json.dumps({"stato": corpo["stato"]}).encode("utf-8"), "application/json; charset=utf-8")
+        self._json({"stato": corpo["stato"]})
 
     def _post_stato(self):
         corpo = self._corpo_json()
@@ -1230,7 +1326,7 @@ class Gestore(BaseHTTPRequestHandler):
         except LookupError:
             self.send_error(404)
             return
-        self._invia(json.dumps({"stato": stato}).encode("utf-8"), "application/json; charset=utf-8")
+        self._json({"stato": stato})
 
     def _corpo_json(self, massimo=4096):
         try:
@@ -1241,7 +1337,7 @@ class Gestore(BaseHTTPRequestHandler):
         return corpo if isinstance(corpo, dict) else None
 
     def _errore(self, codice, messaggio):
-        self._invia(json.dumps({"errore": messaggio}, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8", codice)
+        self._json({"errore": messaggio}, codice)
 
     def _configura(self, azione):
         """Cambi ai file globali di Claude: interruttori di skill e plugin, aggiornamento di una skill già controllata."""
@@ -1261,7 +1357,7 @@ class Gestore(BaseHTTPRequestHandler):
                 esito = {"nome": corpo["nome"], "attivo": corpo["attivo"]}
             else:
                 esito = controllo_skill.aggiorna(corpo["nome"], corpo.get("atteso") or "")
-            self._invia(json.dumps(esito, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
+            self._json(esito)
         except LookupError:
             self._errore(404, "non trovata: " + corpo["nome"])
         except (ValueError, RuntimeError) as e:
@@ -1280,28 +1376,11 @@ class Gestore(BaseHTTPRequestHandler):
         percorso = self.path.split("?", 1)[0]  # un parametro in più (es. ?v=2) non deve dare 404
         if percorso == "/":
             self._invia((HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
-        elif percorso == "/api/stato":
-            self._invia(json.dumps(stato(), ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
-        elif percorso == "/api/piano":
-            self._invia(json.dumps(piano(), ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
-        elif percorso == "/api/oggi":
-            self._invia(json.dumps(oggi(datetime.now()), ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
-        elif percorso == "/api/moduli":
-            self._invia(json.dumps(moduli_attivi()).encode("utf-8"), "application/json; charset=utf-8")
-        elif percorso == "/api/configurazione":
-            self._invia(json.dumps(configurazione_dati(), ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
-        elif percorso == "/api/prestazioni":
-            self._invia(json.dumps(prestazioni(), ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
-        elif percorso == "/api/esecuzioni":
-            self._invia(json.dumps(esecuzioni(), ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
-        elif percorso == "/api/servizi":
-            self._invia(json.dumps(servizi_dati(), ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
-        elif percorso == "/api/aspetta":
-            self._invia(json.dumps(aspetta(), ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
-        elif percorso == "/api/post/aperte":
-            self._invia(json.dumps({"aperte": post_richieste_aperte()}).encode("utf-8"), "application/json; charset=utf-8")
-        elif percorso == "/api/post":
-            self._invia(json.dumps(post_calendari(), ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
+        elif percorso in STATICI:
+            nome, tipo = STATICI[percorso]
+            self._invia((HERE / nome).read_bytes(), tipo)
+        elif percorso in ROTTE_JSON:
+            self._json(ROTTE_JSON[percorso]())
         elif percorso.startswith("/api/post/immagine/"):
             try:
                 progetto, canale, id_voce, n = percorso.removeprefix("/api/post/immagine/").split("/")
@@ -1315,10 +1394,6 @@ class Gestore(BaseHTTPRequestHandler):
                 self._invia(immagine.read_bytes(), post_modulo.ESTENSIONI[immagine.suffix.lower()])
         elif percorso.startswith("/api/post/scarica/") or percorso.startswith("/api/post/zip/"):
             self._post_scarica(percorso)
-        elif percorso == "/api/avvii":
-            self._invia(json.dumps(avvii(), ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
-        elif percorso == "/api/bozze":
-            self._invia(json.dumps(bozze_per_rete(), ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
         elif percorso.startswith("/api/bozze/immagine/"):
             rete, _, nome = percorso.removeprefix("/api/bozze/immagine/").partition("/")
             immagine = immagine_bozza(nome, RETI[rete]) if rete in RETI else None
@@ -1328,6 +1403,9 @@ class Gestore(BaseHTTPRequestHandler):
                 self._invia(immagine.read_bytes(), "image/png")
         else:
             self.send_error(404)
+
+    def _json(self, oggetto, codice=200):
+        self._invia(json.dumps(oggetto, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8", codice)
 
     def _invia(self, corpo, tipo, codice=200, scarica=None):
         self.send_response(codice)

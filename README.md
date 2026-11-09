@@ -4,6 +4,8 @@ A starter kit for a personal "second brain": an Obsidian vault of plain Markdown
 
 > **Status: v0.1.** The vault structure, the setup wizard, the checks and the local dashboard work. Scheduled jobs are generated for macOS, Linux and Windows. Used daily on macOS. On Linux and Windows the automated tests pass in CI, but nobody has used the installer there for real yet: see "Platform support". Nothing here has been tested against a real iCloud, Nextcloud or Fastmail account.
 
+> **Languages.** The documentation is bilingual: this file in English, [README.it.md](README.it.md) in Italian. The files the system writes and reads (`STATE.md`, daily notes, command texts, `scripts/verify` messages) are in Italian in v0.1; the ADR defaults are in English. Translating them is not planned yet.
+
 ## What you get
 
 - **Projects**: one short `STATE.md` per project, rewritten (never appended), a dated `decisions.md`, and a row in `projects/INDEX.md`.
