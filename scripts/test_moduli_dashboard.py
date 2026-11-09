@@ -9,7 +9,8 @@ RADICE = Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location("server", RADICE / "scripts" / "dashboard" / "server.py")
 server = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(server)
-HTML = (RADICE / "scripts" / "dashboard" / "index.html").read_text(encoding="utf-8")
+D = RADICE / "scripts" / "dashboard"
+HTML = "".join((D / n).read_text(encoding="utf-8") for n in ("index.html", "dashboard.js", "dashboard.css"))
 
 
 def con_config(cfg):
@@ -17,6 +18,27 @@ def con_config(cfg):
     if cfg is not None:
         (Path(d.name) / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
     return d
+
+
+class ModelloAssistenteTest(unittest.TestCase):
+    def prova(self, cfg):
+        with con_config(cfg) as d:
+            return server.modello_assistente(d)
+
+    def test_locale_o_cloud_dal_config(self):
+        self.assertEqual(self.prova({"modelli": {"assistente": "ollama:qwen3:8b"}}), {"nome": "qwen3:8b", "locale": True})
+        self.assertEqual(self.prova({"modelli": {"assistente": "claude"}}), {"nome": "Claude", "locale": False})
+
+    def test_senza_scelta_o_con_scelta_sbagliata_dice_nessuno(self):
+        self.assertEqual(self.prova({}), {"nome": "nessuno", "locale": None})
+        self.assertEqual(self.prova(None), {"nome": "nessuno", "locale": None})
+        self.assertEqual(self.prova({"modelli": {"assistente": "gpt:x"}}), {"nome": "nessuno", "locale": None})
+
+    def test_la_pagina_non_scrive_fisso_che_il_modello_e_locale(self):
+        # se si passa a Claude la pagina continuerebbe a dire «locale» mentre i dati vanno nel cloud
+        self.assertNotIn("Risposta del modello locale", HTML)
+        self.assertNotIn("modello locale, risponde in sola lettura", HTML)
+        self.assertIn('id="assistente-modello"', HTML)
 
 
 class CalendarioAlModelloTest(unittest.TestCase):

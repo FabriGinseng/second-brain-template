@@ -1,14 +1,47 @@
 #!/usr/bin/env python3
-"""Pre-commit: gitleaks sul contenuto in stage. Blocca il commit se trova un segreto.
+"""Pre-commit: gitleaks, poi scripts/verify, poi i test se il commit tocca il codice.
 
 Attivazione (una volta per clone): git config core.hooksPath scripts/hooks
 Se manca gitleaks il commit è bloccato, perché un controllo assente non protegge (brew install gitleaks).
-Un falso positivo si segnala in .gitleaksignore con l'impronta che gitleaks stampa; solo per un commit: git commit --no-verify.
+Un falso positivo si segnala in .gitleaksignore con l'impronta che gitleaks stampa. Aggirare l'hook con --no-verify è negato in .claude/settings.json.
+I test girano solo se tra i file in stage ce n'è uno sotto scripts/, template/ o .claude/: la chiusura della giornata mette in stage
+solo projects/, daily/, radar/, inbox/ e content/, quindi un test rosso non può fermare il commit notturno.
+Ogni passo ha un tempo massimo (SB_PRE_COMMIT_TIMEOUT, 120 s): un test bloccato non tiene fermo git per sempre.
 """
+import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
+
+CODICE = ("scripts/", "template/", ".claude/")
+TEMPO = int(os.environ.get("SB_PRE_COMMIT_TIMEOUT", "120"))
 
 if not shutil.which("gitleaks"):
     sys.exit("pre-commit: gitleaks non trovato nel PATH, commit bloccato. Installalo (brew install gitleaks).")
-sys.exit(subprocess.run(["gitleaks", "git", "--pre-commit", "--staged", "--redact", "--no-banner"]).returncode)
+rc = subprocess.run(["gitleaks", "git", "--pre-commit", "--staged", "--redact", "--no-banner"]).returncode
+if rc:
+    sys.exit(rc)
+
+# git passa GIT_INDEX_FILE e simili ai processi figli: i test che creano repo temporanei userebbero l'indice di questo.
+ambiente = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
+def passo(nome, comando):
+    try:
+        r = subprocess.run(comando, capture_output=True, text=True, env=ambiente, timeout=TEMPO)
+    except subprocess.TimeoutExpired:
+        sys.exit(f"pre-commit: {nome} supera il tempo massimo ({TEMPO} s), commit bloccato.")
+    if r.returncode and not (nome == "i test" and r.returncode == 5):  # 5: unittest non ha trovato test (Python 3.12+)
+        sys.stderr.write((r.stdout + r.stderr)[-3000:])
+        sys.exit(f"pre-commit: {nome} non passa, commit bloccato.")
+
+
+if Path("scripts/verify").is_file():
+    passo("scripts/verify", [sys.executable, "-I", "scripts/verify"])
+
+# -z: senza, git scrive i nomi con lettere accentate tra virgolette ("scripts/citt\303\240.py") e il prefisso non si riconosce.
+# Ambiente intero: con `commit -a` git usa un indice alternativo.
+in_stage = subprocess.run(["git", "diff", "--cached", "--name-only", "-z"], capture_output=True, text=True).stdout.split("\0")
+if Path("scripts").is_dir() and any(f.startswith(CODICE) for f in in_stage if f):
+    passo("i test", [sys.executable, "-I", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_*.py"])

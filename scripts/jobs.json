@@ -21,6 +21,7 @@
     ]
   },
   "chiusura": {
+    "log": "chiudi",
     "description": "/chiudi-giornata: rewrites the STATE files from your commits and commits locally",
     "command": [
       "{python}",

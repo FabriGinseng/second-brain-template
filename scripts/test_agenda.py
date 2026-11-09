@@ -31,6 +31,28 @@ class AgendaTest(unittest.TestCase):
         self.assertTrue(v[1]["lavoro"])
         self.assertEqual(v[2]["fonte"], "piano")             # le voci del piano mantengono i loro campi
 
+    def test_i_post_scaduti_da_piu_di_due_giorni_sono_arretrati_e_vanno_in_fondo_al_ritardo(self):
+        # dieci post rossi in cima a «Cosa mi aspetta» saturano l'allarme: il rosso resta per ciò che chiede una decisione oggi
+        scadenze = [{"fonte": "post", "testo": "Post: vecchio", "data": "2026-10-20"},
+                    {"fonte": "post", "testo": "Post: di ieri", "data": "2026-10-29"},
+                    {"fonte": "piano", "testo": "Voce del piano vecchia", "data": "2026-10-10"},
+                    {"fonte": "post", "testo": "Post: tra due giorni", "data": "2026-11-01"}]
+        v = agenda.unisci([], scadenze, ADESSO)
+        per_titolo = {x["titolo"]: x for x in v}
+        self.assertTrue(per_titolo["Post: vecchio"]["arretrato"])
+        self.assertFalse(per_titolo["Post: di ieri"].get("arretrato", False))            # ieri non è un arretrato
+        self.assertFalse(per_titolo["Voce del piano vecchia"].get("arretrato", False))   # solo i post
+        self.assertFalse(per_titolo["Post: tra due giorni"].get("arretrato", False))
+        titoli = [x["titolo"] for x in v]
+        self.assertEqual(set(titoli[:2]), {"Voce del piano vecchia", "Post: di ieri"})  # prima il ritardo che chiede una decisione
+        self.assertEqual(titoli[2], "Post: vecchio")                                  # poi l'arretrato
+
+    def test_la_pagina_raggruppa_gli_arretrati(self):
+        D = Path(__file__).parent / "dashboard"
+        html = "".join((D / n).read_text(encoding="utf-8") for n in ("index.html", "dashboard.js", "dashboard.css"))
+        self.assertIn("v.arretrato", html)
+        self.assertIn("'Post arretrati (' +", html)
+
     def test_lo_stesso_evento_in_due_calendari_si_mostra_una_volta(self):
         a, b = datetime(2026, 11, 2, 15, 0), datetime(2026, 11, 2, 16, 0)
         v = agenda.unisci([evento("Dentista", a, b, cal="Google"), evento("Dentista", a, b, cal="Apple"), evento("Dentista", a, b.replace(hour=17))], [], ADESSO)

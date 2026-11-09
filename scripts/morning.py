@@ -22,7 +22,8 @@ def morning(vault=VAULT, run=subprocess.run, env=os.environ, oggi=None, obsidian
         print(shlex.join(CMD))
         return 0
     try:
-        r = run(CMD, cwd=vault, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8")
+        r = run(CMD, cwd=vault, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                env={**env, "SB_NO_STOP_VERIFY": "1"})  # lo Stop hook non deve rimandare indietro una run non presidiata
     except FileNotFoundError:
         print("morning: claude non trovato nel PATH", file=sys.stderr)
         return 127

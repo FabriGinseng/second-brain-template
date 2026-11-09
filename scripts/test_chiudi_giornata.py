@@ -27,6 +27,7 @@ class ChiudiGiornata(unittest.TestCase):
         self.stati = []        # uscite successive di `git status --porcelain`
         self.attivita = ""
         self.verify_rc = 0
+        self.in_stage = ""  # uscita di `git diff --cached --name-only -z`
         self.commit_rc = 0
         self.claude_out = ""
         self.segnalazioni = []
@@ -44,6 +45,8 @@ class ChiudiGiornata(unittest.TestCase):
             return Esito(stdout=self.attivita)
         if cmd[-1].endswith("verify"):
             return Esito(self.verify_rc)
+        if cmd[:3] == ["git", "diff", "--cached"]:
+            return Esito(stdout=self.in_stage)
         if cmd[:2] == ["git", "commit"]:
             return Esito(self.commit_rc)
         return Esito()
@@ -84,11 +87,41 @@ class ChiudiGiornata(unittest.TestCase):
         self.attivita = "fse: 3 commit\n"
         self.stati = [" M x", " M STATE.md"]
         self.vai()
-        self.assertEqual(self.nomi(), ["script:attivita-progetti.py", "claude", "git status", "script:verify", "git add", "git commit"])
+        self.assertEqual(self.nomi(), ["script:attivita-progetti.py", "claude", "git status", "script:verify", "git diff", "git add", "git commit"])
         prompt = self.chiamate[1][-1]
         self.assertEqual(prompt, "/chiudi-giornata\nAttività dei repo dall'ultimo STATE:\nfse: 3 commit")
         self.assertEqual(self.chiamate[-1][3:5], ["-m", "chiusura 2026-11-03"])
         self.assertIn("commit: chiusura 2026-11-03", self.leggi_log())
+
+    def test_committa_solo_le_cartelle_dove_si_scrive_in_autonomia(self):
+        # ADR-004: inbox, radar, daily, projects, content. Il lavoro di ricerca o i report non finiscono nel commit notturno.
+        for cartella in ("projects", "research_notes", "reports"):
+            (self.vault / cartella).mkdir()
+        self.stati = [" M x", " M STATE.md"]
+        self.vai()
+        add = next(c for c in self.chiamate if c[:2] == ["git", "add"])
+        self.assertEqual(add, ["git", "add", "--", "projects", "daily"])
+        self.assertNotIn("-A", add)
+
+    def test_file_gia_in_stage_fuori_dalle_cartelle_autonome_non_si_committano(self):
+        # un `git add scripts/x.py` rimasto in stage (commit rifiutato dal pre-commit) finirebbe nel commit «chiusura»
+        self.stati = [" M x", " M STATE.md"]
+        self.in_stage = "scripts/x.py\0projects/a/STATE.md\0"
+        self.vai()
+        self.assertNotIn("git commit", self.nomi())
+        self.assertNotIn("git add", self.nomi())
+        self.assertIn("fuori dalle cartelle autonome", self.leggi_log())
+
+    def test_lo_stato_del_vault_guarda_solo_le_cartelle_autonome(self):
+        # senza il filtro un file in research_notes/ farebbe partire il modello ogni sera
+        (self.vault / "projects").mkdir()
+        self.stati = [""]
+        self.attivita = ""
+        self.vai()
+        status = next(c for c in self.chiamate if c[:2] == ["git", "status"])
+        self.assertEqual(status[:3], ["git", "status", "--porcelain"])
+        self.assertEqual(status[3:], ["--", "projects", "daily"])
+        self.assertIn("niente da aggiornare", self.leggi_log())
 
     def test_senza_attivita_il_prompt_dice_nessuna(self):
         self.stati = [" M x", ""]

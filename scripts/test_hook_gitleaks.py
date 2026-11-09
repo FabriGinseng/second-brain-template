@@ -44,6 +44,61 @@ class HookGitleaks(unittest.TestCase):
         r = self.commit("nota.md", "# Ciao\nNiente di segreto.\n")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
+    def scrivi(self, nome, testo):
+        p = self.repo / nome
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(testo, encoding="utf-8")
+        git(self.repo, "add", nome)
+
+    def test_verify_che_fallisce_blocca_il_commit(self):
+        self.scrivi("scripts/verify", "import sys\nprint('STATE troppo lungo')\nsys.exit(1)\n")
+        self.scrivi("nota.md", "# Ciao\n")
+        r = git(self.repo, "commit", "-q", "-m", "prova")
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("scripts/verify", r.stdout + r.stderr)
+        self.assertIn("STATE troppo lungo", r.stdout + r.stderr)  # il motivo si legge, non solo l'esito
+
+    def test_verify_che_passa_lascia_passare(self):
+        self.scrivi("scripts/verify", "print('OK')\n")
+        self.scrivi("nota.md", "# Ciao\n")
+        r = git(self.repo, "commit", "-q", "-m", "prova")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_i_test_girano_solo_se_il_commit_tocca_il_codice(self):
+        # La chiusura delle 18:30 mette in stage solo projects/daily/...: un test rosso non deve fermarla.
+        self.scrivi("scripts/verify", "print('OK')\n")
+        self.scrivi("scripts/test_falso.py", "import unittest\nclass T(unittest.TestCase):\n    def test_x(self):\n        self.fail('rosso')\n")
+        git(self.repo, "-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "base")
+        self.scrivi("daily/oggi.md", "# oggi\n")
+        r = git(self.repo, "commit", "-q", "-m", "solo note")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.scrivi("scripts/modulo.py", "x = 1\n")
+        r = git(self.repo, "commit", "-q", "-m", "codice")
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("test", r.stdout + r.stderr)
+        self.assertIn("rosso", r.stdout + r.stderr)
+
+    def prepara_codice_rosso(self):
+        self.scrivi("scripts/verify", "print('OK')\n")
+        self.scrivi("scripts/test_falso.py", "import unittest\nimport time\nclass T(unittest.TestCase):\n    def test_x(self):\n        time.sleep(float(__import__('os').environ.get('LENTO', '0')))\n        self.fail('rosso')\n")
+        git(self.repo, "-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "base")
+
+    def test_nome_con_accento_conta_come_codice(self):
+        # senza -z git scrive "scripts/citt\303\240.py" tra virgolette e il prefisso scripts/ non si riconosce
+        self.prepara_codice_rosso()
+        self.scrivi("scripts/città.py", "x = 1\n")
+        r = git(self.repo, "commit", "-q", "-m", "codice")
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("rosso", r.stdout + r.stderr)
+
+    def test_un_test_bloccato_non_ferma_il_commit_per_sempre(self):
+        self.prepara_codice_rosso()
+        self.scrivi("scripts/modulo.py", "x = 1\n")
+        env = {**os.environ, "SB_PRE_COMMIT_TIMEOUT": "1", "LENTO": "20"}
+        r = git(self.repo, "commit", "-q", "-m", "codice", env=env, timeout=30)
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("tempo", r.stdout + r.stderr)
+
     def test_senza_gitleaks_blocca(self):
         vuota = Path(self.tmp.name) / "vuota"
         vuota.mkdir()

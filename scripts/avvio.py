@@ -11,7 +11,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -32,6 +32,12 @@ def risponde(url):
     except OSError:
         return False
     return True
+
+
+def radar_mancante(vault, adesso):
+    """Vero se ci sono gli indirizzi dei feed (memory/feeds.md) e questa settimana, da lunedì, non esiste ancora un report in radar/."""
+    lunedi = (adesso.date() - timedelta(days=adesso.weekday())).isoformat()
+    return (vault / "memory" / "feeds.md").is_file() and not any(f.stem >= lunedi for f in (vault / "radar").glob("20*.md"))
 
 
 def avvio(vault=VAULT, log=LOG, run=subprocess.run, env=os.environ, adesso=None, attendi=time.sleep, risponde=risponde):
@@ -70,6 +76,12 @@ def avvio(vault=VAULT, log=LOG, run=subprocess.run, env=os.environ, adesso=None,
         say("brief di oggi assente: lancio /morning")
         if not dry and py("morning.py").returncode:
             return 1
+
+    # Radar della settimana: né n8n né launchd recuperano un giro perso (Mac in sospensione o spento alle 7:00).
+    if radar_mancante(vault, adesso or datetime.now()):
+        say("radar di questa settimana assente: lo lancio")
+        if not dry:
+            py("radar.py")  # se non riesce non ferma l'avvio: riprova al prossimo login
 
     # Dashboard: il server gira con launchd (job dashboard); qui si apre la pagina.
     if not dry:
