@@ -87,6 +87,12 @@ def comando(job, ctx, sistema=None):
     return args
 
 
+def nome_log(nome, job):
+    """File di log del job. Di norma porta il nome del job; la chiave `log` di jobs.json lo cambia quando lo script scrive altrove
+    (chiusura: lo script scrive in second-brain-chiudi.log, e la dashboard giudica il job dal suo log)."""
+    return "second-brain-%s.log" % job.get("log", nome)
+
+
 def preparazione(job, ctx, sistema):
     """Comandi da lanciare prima di registrare il job ("build" in jobs.json: la tray su macOS si compila qui)."""
     return [_risolvi(c, ctx, sistema) for c in job.get("build", {}).get(sistema, [])]
@@ -104,7 +110,7 @@ def piano_launchd(nome, job, ctx):
     # A long-running job (the tray) must not keep the Mac awake for the whole session.
     if not job.get("service") and not job.get("long_running"):
         args = ["/usr/bin/caffeinate", "-i"] + args  # il Mac resta sveglio finché il job lavora
-    log = str(ctx["log"] / ("second-brain-%s.log" % nome))
+    log = str(ctx["log"] / nome_log(nome, job))
     plist = {"Label": etichetta, "ProgramArguments": args, "WorkingDirectory": str(ctx["vault"]), "StandardOutPath": log, "StandardErrorPath": log,
              "EnvironmentVariables": {"PATH": "%s/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" % ctx["home"]}}
     if job.get("time") and giorni(job):
@@ -130,7 +136,7 @@ def _q(parola):
 
 def piano_systemd(nome, job, ctx):
     etichetta = "%s.%s" % (ctx["etichetta"], nome)
-    log = str(ctx["log"] / ("second-brain-%s.log" % nome))
+    log = str(ctx["log"] / nome_log(nome, job))
     servizio = ["[Unit]", "Description=second-brain %s: %s" % (nome, job.get("description", "")), "",
                 "[Service]", "Type=%s" % ("simple" if job.get("service") else "oneshot"),
                 "ExecStart=%s" % " ".join(_q(a) for a in comando(job, ctx)), "WorkingDirectory=%s" % ctx["vault"],
@@ -168,7 +174,7 @@ def utente_windows(ctx):
 
 def piano_windows(nome, job, ctx):
     etichetta = "%s.%s" % (ctx["etichetta"], nome)
-    log = ctx["log"] / ("second-brain-%s.log" % nome)
+    log = ctx["log"] / nome_log(nome, job)
     args = comando(job, ctx, "windows")
     riga = " ".join('"%s"' % a for a in args)
     trigger = []

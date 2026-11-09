@@ -20,9 +20,9 @@ Chiudi la giornata di lavoro nel vault. Scrivi in italiano.
 5. **Verifica** (solo con qualcuno davanti). Esegui `./scripts/verify` (su Windows `py -3 scripts/verify`, perché lo shebang non vale). Se esce con 1, leggi l'elenco, correggi i file indicati e rilancia. Al massimo tre tentativi in tutto.
 6. **Commit** (solo con qualcuno davanti). Solo se `scripts/verify` è passato (exit 0):
    ```bash
-   git add -A && git commit -m "chiusura YYYY-MM-DD" -m "Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
+   git add -- projects daily radar inbox content && git commit -m "chiusura YYYY-MM-DD" -m "Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>" -- projects daily radar inbox content
    ```
-   Con la data di oggi. Non fare push.
+   Con la data di oggi. Solo le cartelle dove si scrive in autonomia (ADR-004): `research_notes/`, `reports/` e gli altri file di lavoro li committa chi li ha scritti. Non fare push.
 7. **Se la verifica non passa dopo tre tentativi.** Non committare. Scrivi il problema, con i file interessati, nella sezione "Da confermare" del `daily/` di oggi, e fermati.
 
 Non toccare `CLAUDE.md`, `memory/` e `docs/adr/`: non rientrano in questa routine.

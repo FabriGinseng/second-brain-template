@@ -3,6 +3,7 @@
 Gli orari si leggono dai job di scripts/jobs.json (via genera_plist), quindi non si duplicano qui. Il log è lo
 StandardOutPath del plist: la sua data di modifica è l'ultima volta che il job ha scritto.
 """
+import os
 import re
 import subprocess
 from datetime import datetime, timedelta
@@ -11,6 +12,10 @@ from pathlib import Path
 # nome del job -> azione della dashboard che lo lancia a mano (None: nessun pulsante)
 JOB_PIANIFICATI = {"morning": "morning", "chiusura": "chiudi-giornata", "radar": "radar", "pulizia": "pulizia", "bozze": "bozze"}
 TOLLERANZA = timedelta(minutes=15)
+# Ultime righe con cui i job dicono «sono partito ma non c'era niente da fare»
+# Le righe con cui i job dicono di non aver finito il lavoro pur uscendo con 0 (chiudi-giornata esce sempre con 0)
+FALLITO = re.compile(r"verify non passa|commit bloccato|non autenticato|già in stage fuori|Traceback", re.IGNORECASE)
+SALTATO = re.compile(r"\bsalto\b|già elaborata|nessuna inbox|niente da aggiornare", re.IGNORECASE)
 
 
 def orari(plist):
@@ -62,6 +67,28 @@ def avvio_mac():
         return None
 
 
+def ultimo_exit(etichetta):
+    """Il codice di uscita dell'ultima esecuzione del job, da `launchctl print`, o None (mai partito, non registrato, sistema senza launchctl)."""
+    try:
+        r = subprocess.run(["/bin/launchctl", "print", "gui/%d/%s" % (getattr(os, "getuid", lambda: 0)(), etichetta)], capture_output=True, text=True, encoding="utf-8", timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    m = re.search(r"last exit code = (-?\d+)", r.stdout)
+    return int(m.group(1)) if m else None
+
+
+def esito_job(exit_code, riga):
+    """(stato, spiegazione) se l'ultimo giro è fallito o non ha fatto nulla, altrimenti None. Il log scritto dopo l'orario previsto
+    dice che il job è partito, non che è riuscito: il codice di uscita e l'ultima riga dicono come è andata."""
+    if exit_code not in (None, 0):
+        return "fallito", "l'ultimo giro è uscito con codice %s" % exit_code
+    if FALLITO.search(riga or ""):
+        return "fallito", "l'ultima riga del log dice che non ha finito: %s" % riga
+    if SALTATO.search(riga or ""):
+        return "saltato", "ha girato ma non c'era nulla da fare: %s" % riga
+    return None
+
+
 def _ultima_riga(log):
     try:
         righe = [r for r in log.read_text(encoding="utf-8", errors="replace").splitlines() if r.strip()]
@@ -88,8 +115,10 @@ def stato_job(previsto, prossimo, adesso, log_mtime, in_corso, acceso):
     return ("mai" if log_mtime is None else "mancato"), motivo
 
 
-def avvii(adesso, jobs, cartella_log, in_corso=(), acceso=None, azioni=()):
-    """Una riga per job pianificato. 'in_corso' sono i nomi delle azioni avviate dalla dashboard e ancora vive."""
+def avvii(adesso, jobs, cartella_log, in_corso=(), acceso=None, azioni=(), esiti=None, giri_a_mano=None):
+    """Una riga per job pianificato. 'in_corso' sono i nomi delle azioni avviate dalla dashboard e ancora vive;
+    'esiti' è {job: codice di uscita dell'ultimo giro} (da ultimo_exit); 'giri_a_mano' è {azione: (inizio, codice)} dei giri lanciati
+    dalla dashboard: se è più recente dell'ultimo orario previsto vale il suo codice, perché il log è lo stesso e launchd non sa del giro a mano."""
     righe = []
     for nome, azione in JOB_PIANIFICATI.items():
         if nome not in jobs:  # un job di un modulo non scelto non è registrato
@@ -101,6 +130,13 @@ def avvii(adesso, jobs, cartella_log, in_corso=(), acceso=None, azioni=()):
         previsto = ultimo_previsto(voci, adesso)
         prossimo = prossimo_previsto(voci, adesso)
         stato, motivo = stato_job(previsto, prossimo, adesso, log_mtime, azione in in_corso, acceso)
+        ultima = _ultima_riga(log) if log.exists() else ""
+        if stato in ("ok", "in-ritardo"):  # partito: ma è riuscito?
+            giro = (giri_a_mano or {}).get(azione)
+            codice = giro[1] if giro and previsto and giro[0] >= previsto else (esiti or {}).get(nome)
+            esito = esito_job(codice, ultima)
+            if esito:
+                stato, motivo = esito
         righe.append({
             "nome": nome,
             "azione": azione if azione in azioni else None,
@@ -109,6 +145,6 @@ def avvii(adesso, jobs, cartella_log, in_corso=(), acceso=None, azioni=()):
             "ultimoLog": log_mtime.isoformat(timespec="minutes") if log_mtime else None,
             "stato": stato,
             "motivo": motivo,
-            "ultimaRiga": _ultima_riga(log) if log.exists() else "",
+            "ultimaRiga": ultima,
         })
     return {"macAcceso": acceso.isoformat(timespec="minutes") if acceso else None, "job": righe}

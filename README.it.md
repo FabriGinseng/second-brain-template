@@ -4,6 +4,8 @@ Un kit di partenza per un "second brain" personale: un vault Obsidian di Markdow
 
 > **Stato: v0.1.** La struttura del vault, il wizard di installazione, i controlli e la dashboard locale funzionano. I job pianificati si generano per macOS, Linux e Windows. Usato ogni giorno su macOS. Su Linux e Windows i test automatici passano in CI, ma nessuno ha ancora usato davvero l'installer lì: vedi «Sistemi supportati». Niente di questo è stato provato con un account iCloud, Nextcloud o Fastmail vero.
 
+> **Lingue.** La documentazione è bilingue: questo file in italiano, [README.md](README.md) in inglese. I file che il sistema scrive e legge (`STATE.md`, note del giorno, testi dei comandi, messaggi di `scripts/verify`) sono in italiano nella v0.1; gli ADR di partenza sono in inglese. Tradurli non è previsto per ora.
+
 ## Cosa ottieni
 
 - **Progetti**: un breve `STATE.md` per progetto, riscritto (mai appeso), un `decisions.md` datato e una riga in `projects/INDEX.md`.

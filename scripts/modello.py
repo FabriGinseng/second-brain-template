@@ -12,6 +12,7 @@ Regole: la cartella riservata non passa mai da qui (nessun passo la legge); date
 """
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -87,7 +88,8 @@ def _claude(nome, istruzioni, testo, json_, timeout):
     if nome:
         comando += ["--model", nome]
     try:
-        r = subprocess.run(comando, input=testo, capture_output=True, text=True, encoding="utf-8", timeout=timeout)
+        r = subprocess.run(comando, input=testo, capture_output=True, text=True, encoding="utf-8", timeout=timeout,
+                           env={**os.environ, "SB_NO_STOP_VERIFY": "1"})  # lo Stop hook non deve rimandare indietro una run senza strumenti
     except (OSError, subprocess.TimeoutExpired) as e:
         raise ModelloNonDisponibile("claude non risponde: %s" % e)
     if r.returncode != 0:

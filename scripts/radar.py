@@ -7,6 +7,7 @@ serve radar/.indice-progetti.json (scripts/indice-embedding.py).
 import importlib.util
 import subprocess
 import sys
+from datetime import date, timedelta
 from pathlib import Path
 
 VAULT = Path(__file__).resolve().parent.parent
@@ -23,7 +24,20 @@ def _piu_recente(file):
     return max(file, key=lambda f: f.stat().st_mtime, default=None)
 
 
-def radar(vault=VAULT, lancia=_lancia):
+def raccogli_se_manca(vault, lancia, oggi=None):
+    """n8n parte alle 7:00 ma non recupera un giro perso (Mac in sospensione o spento): se questa settimana non c'è un'inbox,
+    la raccoglie scripts/feed.py dagli indirizzi di memory/feeds.md. Senza quel file non fa niente (la raccolta resta a n8n)."""
+    oggi = oggi or date.today()
+    lunedi = (oggi - timedelta(days=oggi.weekday())).isoformat()
+    if not (vault / "memory" / "feeds.md").is_file():
+        return
+    if any(f.name[:10] >= lunedi for f in (vault / "inbox").glob("*-novita.md")):
+        return
+    lancia(vault, "scripts/feed.py")
+
+
+def radar(vault=VAULT, lancia=_lancia, oggi=None):
+    raccogli_se_manca(vault, lancia, oggi)
     # Il job settimanale gira anche se n8n non ha consegnato una inbox nuova: in quel caso non rifare l'ultima.
     novita = _piu_recente((vault / "inbox").glob("*-novita.md"))
     if novita is None:

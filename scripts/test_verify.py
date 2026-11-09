@@ -85,6 +85,73 @@ class VerifyTest(unittest.TestCase):
             code, out = run_verify(tmp)
             self.assertEqual(code, 0, out)
 
+    def test_claude_md_che_cita_uno_script_inesistente(self):
+        # CLAUDE.md citava avvio.sh quando il job lancia scripts/avvio.py: la prosa si allontana dalla realtà
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            make_vault(root, extra={'scripts/avvio.py': '', 'scripts/verify': ''})
+            (root / 'CLAUDE.md').write_text('Al login `avvio.sh` e `scripts/verify`, poi `scripts/test_*.py` e `scripts/<nome>.py`.', encoding='utf-8')
+            code, out = run_verify(tmp)
+            self.assertEqual(code, 1, out)
+            self.assertIn('CLAUDE.md: avvio.sh non esiste', out)
+            self.assertNotIn('scripts/verify non esiste', out)
+            self.assertNotIn('test_*', out)  # i pattern con * o <> non sono percorsi
+            (root / 'CLAUDE.md').write_text('Al login `avvio.py` e `scripts/verify`.', encoding='utf-8')
+            code, out = run_verify(tmp)
+            self.assertEqual(code, 0, out)
+
+    def test_un_adr_citato_che_non_esiste_e_un_problema(self):
+        # il template pubblico citava ADR-001 e ADR-005, che nel template non c'erano: riferimenti vuoti per chi lo usa
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            make_vault(root, extra={'docs/adr/ADR-002-privacy.md': '# ADR-002', 'scripts/radar.py': '"""Vedi ADR-005 e ADR-002."""',
+                                    'reports/vecchio.md': 'ADR-099 non ancora scritto', 'docs/specs/x.md': 'ADR-098',
+                                    'scripts/test_x.py': '"""Un test che cita ADR-097 per finta."""'})
+            (root / 'README.md').write_text('Decisioni: ADR-002 e ADR-007.', encoding='utf-8')
+            code, out = run_verify(tmp)
+            self.assertEqual(code, 1, out)
+            self.assertIn('scripts/radar.py: ADR-005 non esiste', out)
+            self.assertIn('README.md: ADR-007 non esiste', out)
+            self.assertNotIn('ADR-002 non esiste', out)
+            for ignorato in ('ADR-099', 'ADR-098', 'ADR-097'):  # reports, specifiche e test non sono il prodotto
+                self.assertNotIn(ignorato, out)
+            (root / 'docs' / 'adr' / 'ADR-005-filtro.md').write_text('# ADR-005', encoding='utf-8')
+            (root / 'docs' / 'adr' / 'ADR-007-x.md').write_text('# ADR-007', encoding='utf-8')
+            code, out = run_verify(tmp)
+            self.assertEqual(code, 0, out)
+
+    def test_gli_adr_citati_nei_worktree_non_tracciati_non_bloccano_verify(self):
+        # un worktree di un agente (ignorato da git) con un ADR nuovo bloccava verify, e con lui il commit della chiusura delle 18:30
+        import subprocess as sp
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            make_vault(root, extra={'docs/adr/ADR-002-privacy.md': '# ADR-002', 'scripts/a.py': '"""Vedi ADR-002."""',
+                                    '.claude/worktrees/agent-x/README.md': 'ADR-012 su un ramo', '.claude/skills/terzi/SKILL.md': 'ADR-013 della skill di altri'})
+            sp.run(['git', 'init', '-q', str(root)], check=True)
+            sp.run(['git', '-C', str(root), 'add', 'docs', 'scripts', 'projects', 'templates'], check=True)  # tracciati: solo questi
+            code, out = run_verify(tmp)
+            self.assertEqual(code, 0, out)
+            self.assertNotIn('ADR-012', out)
+            self.assertNotIn('ADR-013', out)
+
+    def test_gli_adr_citati_nei_file_del_template_si_controllano_tutti(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            make_vault(root, extra={'docs/adr/ADR-002-privacy.md': '# ADR-002', 'README.it.md': 'ADR-077', 'INIZIA.md': 'ADR-078',
+                                    'setup.py': '"""ADR-079"""', 'CHANGELOG.md': 'ADR-080', 'templates/x.md': 'ADR-081'})
+            code, out = run_verify(tmp)
+            self.assertEqual(code, 1, out)
+            for nome, adr in (('README.it.md', '077'), ('INIZIA.md', '078'), ('setup.py', '079'), ('CHANGELOG.md', '080'), ('templates/x.md', '081')):
+                self.assertIn('%s: ADR-%s non esiste' % (nome, adr), out)
+
+    def test_senza_cartella_adr_il_controllo_non_si_applica(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            make_vault(root)
+            (root / 'README.md').write_text('ADR-001', encoding='utf-8')
+            code, out = run_verify(tmp)
+            self.assertEqual(code, 0, out)
+
     def test_cartella_riservata_scelta_al_setup_non_va_in_index(self):
         cfg = '{"moduli": {"riservata": {"attivo": true, "cartella": "projects/confidential-notes"}}}'
         with tempfile.TemporaryDirectory() as tmp:
