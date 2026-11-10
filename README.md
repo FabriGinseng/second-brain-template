@@ -135,6 +135,7 @@ Start `claude` in the vault folder and type:
 | `/morning` | the morning brief: projects, news, priorities |
 | `/chiudi-giornata` | rewrites the STATE files from your commits, runs the checks and commits locally; never pushes |
 | `/weekly-review` | what moved, what is stuck, what is neglected |
+| `/cattura <text>` | sorts what you say into the plan, areas, decisions and facts to consolidate; `/weekly-review` moves the facts into `memory/` after one yes |
 | `/post` | turns a note into a LinkedIn draft in `content/linkedin/` |
 | `/bozze-settimana` | three post drafts for the week (LinkedIn and Instagram, as you chose) |
 | `/commit-push-pr` | commit, push and open a PR for a code repo, asking you before the push |

@@ -135,6 +135,7 @@ Avvia `claude` nella cartella del vault e scrivi:
 | `/morning` | il brief del mattino: progetti, novità, priorità |
 | `/chiudi-giornata` | riscrive gli STATE dai tuoi commit, lancia i controlli e committa in locale; non fa mai push |
 | `/weekly-review` | cosa è avanzato, cosa è fermo, cosa è trascurato |
+| `/cattura <testo>` | smista ciò che dici in piano, aree, decisioni e fatti da consolidare; `/weekly-review` porta i fatti in `memory/` con un solo sì |
 | `/post` | trasforma una nota in una bozza LinkedIn in `content/linkedin/` |
 | `/bozze-settimana` | tre bozze di post per la settimana (LinkedIn e Instagram, come hai scelto) |
 | `/commit-push-pr` | commit, push e apertura di una PR per un repo di codice, chiedendoti conferma prima del push |
