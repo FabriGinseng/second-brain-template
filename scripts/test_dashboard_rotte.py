@@ -24,6 +24,7 @@ FORME = {
     "/api/esecuzioni": ("dict", ["bozze", "chiudi-giornata", "commit", "controllo-skill", "morning", "pulizia", "radar", "richieste"]),
     "/api/servizi": ("list", None), "/api/post/aperte": ("dict", ["aperte"]), "/api/post": ("list", None),
     "/api/avvii": ("dict", ["job", "macAcceso"]), "/api/bozze": ("dict", ["instagram", "linkedin"]),
+    "/api/mappa": ("dict", ["conteggi", "nodi", "prossima"]),
 }
 
 
@@ -61,13 +62,14 @@ class RotteTest(unittest.TestCase):
                 self.assertEqual(sorted(dati), chiavi, percorso)
 
     def test_js_e_css_sono_file_serviti_dal_server(self):
-        for percorso, tipo in (("/dashboard.js", "javascript"), ("/dashboard.css", "text/css")):
+        for percorso, tipo in (("/dashboard.js", "javascript"), ("/mappa.js", "javascript"), ("/dashboard.css", "text/css")):
             stato, tipo_http, corpo = self.get(percorso)
             self.assertEqual(stato, 200, percorso)
             self.assertIn(tipo, tipo_http, percorso)
             self.assertGreater(len(corpo), 1000, percorso)
         pagina = self.get("/")[2].decode("utf-8")
         self.assertIn('<script src="/dashboard.js"', pagina)
+        self.assertLess(pagina.index('/mappa.js'), pagina.index('/dashboard.js'))
         self.assertIn('<link rel="stylesheet" href="/dashboard.css"', pagina)
         self.assertNotIn("<script>", pagina)  # niente più codice dentro la pagina
         self.assertNotIn("<style>", pagina)

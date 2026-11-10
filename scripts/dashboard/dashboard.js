@@ -111,102 +111,8 @@ function renderSistema(s) {
   );
 }
 
-function fa(ts) {
-  const min = Math.max(0, Math.round((Date.now() / 1000 - ts) / 60));
-  if (min < 60) return min + ' min fa';
-  if (min < 60 * 24) return Math.round(min / 60) + ' ore fa';
-  const g = Math.round(min / 1440);
-  return g === 1 ? 'ieri' : g + ' giorni fa';
-}
-
-function giorniDa(data) {
-  return Math.floor((Date.now() - new Date(data + 'T12:00:00').getTime()) / 86400000);
-}
-
 function elenco(titolo, voci, classe) {
   return voci.length ? el('div', classe || '', [el('h4', '', [titolo]), el('ul', '', voci.map(v => el('li', '', typeof v === 'string' ? [v] : v)))]) : '';
-}
-
-// Le prime frasi, per non mettere un muro di testo: il resto sta dietro «Tutto».
-function breveTesto(testo, max) {
-  const frasi = testo.trim().split(/(?<=[.!?])\s+/);
-  let out = '';
-  for (const f of frasi) { if (out && (out + ' ' + f).length > max) break; out = out ? out + ' ' + f : f; }
-  if (out.length <= max) return out;
-  const taglio = out.lastIndexOf(' ', max - 1);
-  return out.slice(0, taglio > max * 0.6 ? taglio : max - 1).replace(/[\s,;:(]+$/, '') + '…';
-}
-
-// Commit degli ultimi 14 giorni: una barra per giorno, una sola tinta, valori sul passaggio del mouse.
-function barreCommit(giorni) {
-  const max = Math.max(1, ...giorni.map(g => g.n)), W = 420, H = 48, larg = W / giorni.length;
-  const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: 'none', role: 'img', 'aria-label': 'Commit per giorno negli ultimi 14 giorni', class: 'barre-commit' });
-  svg.append(sv('line', { x1: 0, x2: W, y1: H - 0.5, y2: H - 0.5, class: 'base' }));
-  giorni.forEach((g, i) => {
-    const h = g.n ? Math.max(3, (g.n / max) * (H - 6)) : 0;
-    const r = sv('rect', { x: i * larg + 2, y: H - h - 1, width: larg - 4, height: h, rx: 2 });
-    const t = sv('title'); t.textContent = new Date(g.data + 'T12:00').toLocaleDateString('it-IT', { day: 'numeric', month: 'long' }) + ': ' + g.n + (g.n === 1 ? ' commit' : ' commit');
-    r.append(t); svg.append(r);
-  });
-  return svg;
-}
-
-function dettaglio(titolo, conteggio, figli) {
-  return el('details', 'apri', [el('summary', '', [titolo, conteggio ? el('span', 'pillola', [String(conteggio)]) : '']), ...figli]);
-}
-
-function renderProgetti(progetti) {
-  const nodo = $('progetti');
-  if (!progetti.length) { nodo.replaceChildren(vuoto('Nessun progetto in INDEX.')); return; }
-  nodo.replaceChildren(...progetti.map(p => {
-    const a = p.attivita;
-    const vecchio = giorniDa(p.aggiornato);
-    const fermo = a && a.ultimoCommit ? Math.floor((Date.now() / 1000 - a.ultimoCommit) / 86400) : null;
-    const dove = p.doveSono || p.obiettivo || 'Nessun obiettivo attuale';
-    const sintesi = breveTesto(dove, 190);
-    const commitSett = a ? a.giorni.slice(-7).reduce((t, g) => t + g.n, 0) : null;
-    const dati = el('ul', 'dati', [
-      el('li', '', [el('b', '', [commitSett === null ? '–' : String(commitSett)]), el('span', '', ['commit in 7 giorni'])]),
-      el('li', '', [el('b', fermo > 7 ? 'attenzione' : '', [fermo === null ? '–' : fermo === 0 ? 'oggi' : fermo + ' g fa']), el('span', '', ['ultimo commit'])]),
-      el('li', '', [el('b', vecchio > 2 ? 'attenzione' : '', [vecchio === 0 ? 'oggi' : vecchio + ' g fa']), el('span', '', ['STATE aggiornato'])]),
-      el('li', '', [el('b', '', [String(p.blocchi.length)]), el('span', '', [p.blocchi.length === 1 ? 'blocco aperto' : 'blocchi aperti'])]),
-    ]);
-    const passi = p.passi.length ? [el('h4', '', ['Prossimo passo']), el('p', '', [breveTesto(p.passi[0], 160)])] : [];
-    const ulteriori = [];
-    if (sintesi.length < dove.length) ulteriori.push(dettaglio('Dove sei, per intero', 0, [el('p', '', [dove])]));
-    if (p.passi.length > 1) ulteriori.push(dettaglio('Altri passi', p.passi.length - 1, [el('ul', '', p.passi.slice(1).map(x => el('li', '', [x])))]));
-    if (p.blocchi.length) ulteriori.push(dettaglio('Blocchi', p.blocchi.length, [el('ul', '', p.blocchi.map(x => el('li', '', [x])))]));
-    ulteriori.push(a
-      ? dettaglio('Ultimi movimenti', a.commit.length, [el('p', 'mono', [a.branch + (a.nonCommittate ? ' · ' + a.nonCommittate + ' file non committati' : ' · tutto committato')]),
-          el('ul', 'movimenti', a.commit.map(c => el('li', '', [el('span', 'mono quando', [fa(c.quando)]), el('span', '', [c.messaggio + ' ', el('span', 'mono', [c.ramo])])])))])
-      : dettaglio('Ultimi movimenti', 0, [vuoto('Repo non leggibile dal servizio: controlla i permessi della cartella.')]));
-    const av = p.avanzamento;
-    let avanzamentoNodo;
-    if (av) {
-      const parte = Math.round(av.chiusi / av.totale * 100), riempi = el('span', 'riempi', []);
-      riempi.style.width = parte + '%';
-      const ticketAperti = av.aperti.length ? dettaglio('Ticket aperti', av.aperti.length, [el('ul', '', av.aperti.map(t => el('li', '', [t])))]) : '';
-      const mappe = av.mappe.length > 1 ? dettaglio('Per mappa', av.mappe.length, [el('ul', 'mappe', av.mappe.map(m => el('li', '', [el('span', '', [m.nome]), el('span', 'sub', [m.chiusi + ' su ' + m.totale])])))]) : '';
-      avanzamentoNodo = el('div', 'avanzamento-progetto', [
-        el('div', 'riga', [el('b', '', ['Avanzamento']), el('span', '', [av.chiusi + ' ticket chiusi su ' + av.totale + ' (' + parte + '%)'])]),
-        el('div', 'barra', [riempi]),
-        ...(av.chiusi === av.totale && p.passi.length ? [el('p', 'sub', ['Tutti i ticket sono chiusi, ma ci sono ancora passi da fare: i prossimi non sono ancora ticket.'])] : []),
-        ticketAperti, mappe,
-      ]);
-    } else {
-      avanzamentoNodo = el('p', 'sub', ['Nessun obiettivo misurabile: non ci sono ticket di wayfinder. Con una mappa e dei ticket qui vedresti l\'avanzamento.']);
-    }
-    return el('article', 'progetto-card', [
-      el('header', '', [el('h2', '', [p.nome]), el('span', 'mono', [p.stack])]),
-      el('p', 'stato-breve', [breveTesto(p.stato, 110)]),
-      dati,
-      avanzamentoNodo,
-      a ? el('div', 'grafico-commit', [barreCommit(a.giorni), el('span', 'sub', ['Commit negli ultimi 14 giorni'])]) : '',
-      el('p', 'dove', [sintesi]),
-      ...passi,
-      ...ulteriori,
-    ]);
-  }));
 }
 
 function renderJobVault(s) {
@@ -328,7 +234,7 @@ function renderAspetta(a) {
     : c.assente ? 'Nessun calendario collegato: sotto vedi solo scadenze e post. Come collegarne uno: README, «Calendario».'
     : 'Appuntamenti letti dal calendario alle ' + new Date(c.aggiornato).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) + '. Quali calendari mostrare: docs/calendari.md.'
       + (c.avvisi && c.avvisi.length ? ' Attenzione: ' + c.avvisi.join('; ').slice(0, 200) : '');
-  if (c.stato === 'caricamento' && !ripetiAspetta) ripetiAspetta = setTimeout(() => { ripetiAspetta = null; if (vista === 'oggi') aggiorna(); }, 10000);
+  if (c.stato === 'caricamento' && !ripetiAspetta) ripetiAspetta = setTimeout(() => { ripetiAspetta = null; if (vista === 'agenda') aggiorna(); }, 10000);
   const n = a.novita;
   $('aspetta-novita').replaceChildren(n.daLeggere.length
     ? el('ul', 'piano-voci', n.daLeggere.map(x => el('li', 'riga-aspetta', [el('span', 'voce senza-casella', [el('span', 'testo', [titoloNovita(x)])])])))
@@ -442,10 +348,10 @@ async function aggiorna() {
     aggiornaKpi(s);
     renderRadar(s.radar, s.inbox, s.prossimoRadar);
     renderSistema(s);
-    renderProgetti(s.progetti);
-    renderPassiOggi(s.progetti);
     renderJobVault(s);
-    renderOggi(await (await fetch('/api/oggi', { cache: 'no-store' })).json());
+    const oggi = await (await fetch('/api/oggi', { cache: 'no-store' })).json();
+    renderOggi(oggi);
+    window.Mappa && window.Mappa.imposta(s, oggi);   // la mappa riusa queste due letture: non le rifà
     renderAspetta(await (await fetch('/api/aspetta', { cache: 'no-store' })).json());
     aggiornaEsecuzioni();
     const ra = await fetch('/api/attesa', { cache: 'no-store' });
@@ -715,52 +621,6 @@ async function aggiornaPrestazioni() {
   }
 }
 
-function renderPiano(sezioni) {
-  const nodo = $('piano-sezioni');
-  if (!sezioni.length) { nodo.replaceChildren(vuoto('Nessun piano: docs/piano.md è vuoto o manca.')); $('piano-kpi').replaceChildren(); return; }
-  const tutte = sezioni.flatMap(s => s.voci);
-  const fatte = tutte.filter(v => v.fatto).length, aperte = tutte.length - fatte;
-  const oggi = new Date().toISOString().slice(0, 10);
-  const inRitardo = tutte.filter(v => !v.fatto && v.data && v.data.slice(0, 10) < oggi).length;
-  const parte = tutte.length ? Math.round(fatte / tutte.length * 100) : 0;
-  const riempi = el('span', 'riempi', []);
-  riempi.style.width = parte + '%';
-  $('piano-kpi').replaceChildren(
-    el('li', '', [el('b', 'dato', [String(aperte)]), el('span', '', ['voci aperte'])]),
-    el('li', '', [el('b', inRitardo ? 'attenzione' : '', [String(inRitardo)]), el('span', '', ['in ritardo'])]),
-    el('li', '', [el('b', '', [String(fatte)]), el('span', '', ['fatte'])]),
-    el('li', 'avanzamento', [el('b', '', [parte + '%']), el('span', '', ['del piano completato']), el('div', 'barra', [riempi])]),
-  );
-  const riga = v => el('li', v.fatto ? 'fatto' : '', [voceSpuntabile({ ...v, fonte: 'piano' }, el('span', 'testo', [
-    v.data ? el('span', 'mono quando', [v.data]) : '',
-    el('span', '', [v.testo]),
-  ]))]);
-  nodo.replaceChildren(...sezioni.map(s => {
-    const aperteS = s.voci.filter(v => !v.fatto), fatteS = s.voci.filter(v => v.fatto);
-    const corpo = [];
-    if (aperteS.length) corpo.push(el('ul', 'piano-voci', aperteS.map(riga)));
-    if (fatteS.length) {
-      const d = el('details', '', [el('summary', '', ['Fatte (' + fatteS.length + ')']), el('ul', 'piano-voci', fatteS.map(riga))]);
-      d.open = !aperteS.length ? false : false;
-      corpo.push(d);
-    }
-    return el('section', 'intera', [el('h2', '', [s.titolo, el('span', 'sub', [aperteS.length + ' aperte'])]), ...corpo]);
-  }));
-}
-
-async function aggiornaPiano() {
-  try {
-    const r = await fetch('/api/piano', { cache: 'no-store' });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    renderPiano(await r.json());
-    $('fresco').className = 'fresco';
-    $('fresco').textContent = 'piano letto alle ' + new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
-  } catch (e) {
-    $('fresco').className = 'fresco errore';
-    $('fresco').textContent = 'errore nel caricamento: ' + e.message;
-  }
-}
-
 function nomi(lista, vuotoTesto) {
   return lista.length ? el('div', 'elenco-nomi', lista.map(n => el('span', '', [n]))) : el('p', 'sub', [vuotoTesto]);
 }
@@ -1008,28 +868,13 @@ function renderAvvii(d) {
   }));
 }
 
-// Il "dove sono" degli STATE è lungo: in vista le prime due frasi, il resto si apre.
-function doveSono(testo) {
-  const frasi = testo.match(/[^.!?]+[.!?]+(\s|$)/g) || [testo];
-  const inizio = frasi.slice(0, 2).join('').trim();
-  if (inizio.length >= testo.length - 2) return el('p', 'dove', [testo]);
-  return el('details', 'dove', [el('summary', '', [inizio]), el('p', '', [testo])]);
-}
-
-function renderPassiOggi(progetti) {
-  $('oggi-progetti').replaceChildren(el('ul', '', progetti.map(p => el('li', '', [
-    el('b', '', [p.nome]),
-    el('div', 'sub', [p.primoPasso ? breveTesto(p.primoPasso, 150) : 'Nessun passo registrato.']),
-  ]))));
-}
-
 // «Aspetta te»: ciò che chiede una decisione adesso. Ogni riga porta alla pagina dove decidere.
 function renderAttesa(a) {
   $('oggi-fatto').textContent = a.fatto;
   $('oggi-fatto').style.color = a.conteggi.job ? 'var(--negative)' : 'var(--muted)';
   $('kpi-bozze').textContent = a.conteggi.bozze;
   $('kpi-skill').textContent = a.conteggi.skill ?? '–';
-  $('aspetta-te').replaceChildren(a.voci.length
+  $('aspetta-te-lista').replaceChildren(a.voci.length
     ? el('ul', 'piano-voci', a.voci.map(v => {
       const b = el('button', '', ['Apri']);
       b.type = 'button';
@@ -1523,14 +1368,19 @@ async function aggiornaPost() {
 }
 
 // Ogni pagina ha il suo contenitore (id + '-vista') e la funzione che lo riempie.
+const blocco = id => !$(id).hidden;  // un blocco di Consumi nascosto dai moduli non si carica
 const CARICA = {
-  oggi: aggiorna, progetti: aggiorna, radar: aggiorna, post: aggiornaPost,
-  piano: aggiornaPiano, servizi: aggiornaServizi, claude: aggiornaPrestazioni,
-  avvii: () => { aggiornaAvvii(); aggiorna(); }, prestazioni: () => { aggiornaPrestazioni(); aggiorna(); },
+  mappa: () => { aggiorna(); window.Mappa && window.Mappa.carica(); },
+  agenda: aggiorna, radar: aggiorna, post: aggiornaPost,
+  consumi: () => Promise.all([blocco('consumi-servizi') && aggiornaServizi(), aggiornaPrestazioni(), aggiorna()]),
+  avvii: () => { aggiornaAvvii(); aggiorna(); },
   configurazione: aggiornaConfigurazione,
 };
-const TITOLI = { oggi: 'Oggi', progetti: 'Progetti', radar: 'Radar', piano: 'Piano', servizi: 'Servizi', claude: 'Uso di Claude', post: 'Post', avvii: 'Avvii', prestazioni: 'Modello locale', configurazione: 'Configurazione' };
-let vista = 'oggi';
+const TITOLI = { mappa: 'Mappa', agenda: 'Agenda', radar: 'Radar', post: 'Post', consumi: 'Consumi', avvii: 'Avvii', configurazione: 'Configurazione' };
+// Gli indirizzi delle pagine che non ci sono più portano alla pagina che le ha assorbite (e, per Consumi, alla sua sezione).
+const ALIAS = { oggi: 'mappa', piano: 'mappa', progetti: 'mappa', bozze: 'post', servizi: 'consumi', claude: 'consumi', prestazioni: 'consumi' };
+const SEZIONE = { servizi: 'consumi-servizi', claude: 'consumi-claude', prestazioni: 'consumi-locale' };
+let vista = 'mappa';
 
 // Le pagine dei moduli non scelti in setup.py non compaiono (/api/moduli); senza risposta si mostra tutto.
 let MODULI = null;
@@ -1547,8 +1397,8 @@ async function caricaModuli() {
   try { MODULI = await (await fetch('/api/moduli')).json(); } catch (e) { MODULI = null; }
   $('assistente-modello').textContent = etichettaModello() + ', risponde in sola lettura';
   const voci = [...document.querySelectorAll('.schede > *')];
-  for (const b of voci.filter(x => x.tagName === 'BUTTON')) {
-    b.hidden = !!(MODULI && b.dataset.modulo && !b.dataset.modulo.split(' ').some(m => MODULI[m]));
+  for (const b of document.querySelectorAll('[data-modulo]')) {  // voci del menu e sezioni di Consumi
+    b.hidden = !!(MODULI && !b.dataset.modulo.split(' ').some(m => MODULI[m]));
   }
   voci.forEach((g, i) => {  // un gruppo senza pagine visibili sparisce
     if (!g.classList.contains('gruppo')) return;
@@ -1559,17 +1409,21 @@ async function caricaModuli() {
 }
 
 function mostra(nuova) {
-  if (!ammessa(nuova)) nuova = 'oggi';
+  const sezione = SEZIONE[nuova];
+  nuova = ALIAS[nuova] || nuova;
+  if (!CARICA[nuova] || !ammessa(nuova)) nuova = 'mappa';
   vista = nuova;
   for (const b of document.querySelectorAll('.schede button')) {
     if (b.dataset.vista === nuova) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
   }
   for (const nome of Object.keys(CARICA)) $(nome + '-vista').hidden = nome !== nuova;
   $('pagina').textContent = TITOLI[nuova];
+  $('pagina').classList.toggle('solo-lettori', nuova === 'mappa');  // il saluto della mappa fa da titolo
   $('rail').classList.remove('aperto');
   $('menu').setAttribute('aria-expanded', 'false');
-  try { history.replaceState(null, '', nuova === 'oggi' ? '#' : '#' + nuova); } catch (e) { /* hash opzionale */ }
-  CARICA[nuova]();
+  try { history.replaceState(null, '', nuova === 'mappa' ? '#' : '#' + nuova); } catch (e) { /* hash opzionale */ }
+  // scorre alla sezione quando i dati sono arrivati: prima la pagina è più corta
+  Promise.resolve(CARICA[nuova]()).then(() => { if (sezione && !$(sezione).hidden) $(sezione).scrollIntoView(); });
 }
 
 for (const b of document.querySelectorAll('.schede button')) {
@@ -1586,9 +1440,23 @@ $('menu').addEventListener('click', () => {
 // Su telefono Chiedi parte chiuso: la prima cosa da vedere è «Aspetta te».
 if (!matchMedia('(min-width: 701px)').matches) document.querySelector('#assistente .chiedi').open = false;
 
+// Tema: segue il sistema finché non lo scegli; la scelta resta in localStorage.
+const temaAttuale = () => document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+function applicaTema(t) {
+  document.documentElement.dataset.theme = t;
+  $('tema').textContent = t === 'dark' ? 'Tema chiaro' : 'Tema scuro';
+}
+try { const salvato = localStorage.getItem('tema'); if (salvato === 'light' || salvato === 'dark') document.documentElement.dataset.theme = salvato; } catch (e) { /* senza storage resta il tema di sistema */ }
+applicaTema(temaAttuale());
+$('tema').addEventListener('click', () => {
+  const nuovo = temaAttuale() === 'dark' ? 'light' : 'dark';
+  applicaTema(nuovo);
+  try { localStorage.setItem('tema', nuovo); } catch (e) { /* non salvato */ }
+});
+
 const hashIniziale = location.hash.slice(1);
 caricaModuli().then(() => {
-  mostra(Object.keys(CARICA).includes(hashIniziale) ? hashIniziale : hashIniziale === 'bozze' ? 'post' : 'oggi');
+  mostra(hashIniziale);
   if (hashIniziale === 'bozze' && ammessa('post')) mostraSchedaPost('bozze');
   if (ammessa('post')) aggiornaBadgePost();
   setInterval(() => { CARICA[vista](); if (ammessa('post')) aggiornaBadgePost(); }, 30000);

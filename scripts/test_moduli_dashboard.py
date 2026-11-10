@@ -77,10 +77,13 @@ class ModuliAttiviTest(unittest.TestCase):
 class PagineDeiModuliTest(unittest.TestCase):
     def test_le_pagine_dei_moduli_dichiarano_a_quale_modulo_appartengono(self):
         voci = dict(re.findall(r'data-vista="(\w+)"(?: data-modulo="([\w ]+)")?', HTML.split('id="schede"')[1].split("</nav>")[0]))
-        self.assertEqual({v: voci[v] for v in ("radar", "post", "servizi", "prestazioni")},
-                         {"radar": "radar", "post": "bozze", "servizi": "servizi", "prestazioni": "radar assistente"})
-        for v in ("oggi", "progetti", "piano", "claude", "avvii", "configurazione"):
+        self.assertEqual({v: voci[v] for v in ("radar", "post")}, {"radar": "radar", "post": "bozze"})
+        for v in ("mappa", "agenda", "consumi", "avvii", "configurazione"):
             self.assertEqual(voci[v], "", v)  # le pagine di base non dipendono da un modulo
+        # in Consumi si nascondono le sezioni dei moduli, non la pagina
+        sezioni = dict(re.findall(r'id="(consumi-(?!vista)\w+)"(?: data-modulo="([\w ]+)")?', HTML))
+        self.assertEqual(sezioni, {"consumi-servizi": "servizi", "consumi-claude": "", "consumi-locale": "radar assistente"})
+        voci.update({k: v for k, v in sezioni.items() if v})
         nomi = set(server.MODULI_NOTI)
         for m in " ".join(voci.values()).split():
             self.assertIn(m, nomi)

@@ -3,18 +3,21 @@
 
 Uso: scripts/dashboard/server.py [porta]   (default 8765, ascolta solo su 127.0.0.1)
 Ogni dato viene letto dai file del vault a ogni richiesta. Scrive solo le caselle di docs/piano.md
-e docs/scadenze.md (imposta_fatto), i voti sulle scartate del radar in radar/feedback.jsonl (vota_scartata)
+e docs/scadenze.md (imposta_stato), le voci nuove di docs/piano.md (aggiungi_voce), i voti sulle scartate del radar in radar/feedback.jsonl (vota_scartata)
 e avvia le azioni previste (avvia).
 """
 import importlib.util
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
+import unicodedata
 import threading
+import time
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -482,7 +485,10 @@ def chiamate(ultime=200):
     return {"totale": len(righe), "perOperazione": per_op, "ultime": righe[-ultime:][::-1][:20]}
 
 
-VOCE_PIANO = re.compile(r"^- \[( |x)\] (.+)$")
+VOCE_PIANO = re.compile(r"^- \[( |x|X|~)\] (.+?)\s*$")
+TAG = re.compile(r"(?:^|\s)#([A-Za-z][\w-]*)")
+STATI = {"da_fare": " ", "in_corso": "~", "fatto": "x"}
+STATO_DA_CASELLA = {" ": "da_fare", "~": "in_corso", "x": "fatto", "X": "fatto"}
 DATA_PIANO = re.compile(r"^(\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2})?) — (.+)$")
 
 
@@ -511,10 +517,18 @@ def leggi_sezioni(file):
         if v and sezioni:
             testo = v.group(2)
             d = DATA_PIANO.match(testo)
+            grezzo = d.group(2) if d else testo
+            t = TAG.search(grezzo)
+            stato = STATO_DA_CASELLA[v.group(1)]
             sezioni[-1]["voci"].append({
-                "fatto": v.group(1) == "x",
+                "fatto": stato == "fatto",
+                "stato": stato,
                 "data": d.group(1) if d else None,
-                "testo": d.group(2) if d else testo,
+                "testo": grezzo,
+                "grezzo": grezzo,
+                "tag": t.group(1).lower() if t else None,
+                # testo senza il primo tag, spazi compattati
+                "vista": " ".join((grezzo[:t.start(1) - 1] + grezzo[t.end(1):]).split()) if t else grezzo,
             })
     return sezioni
 
@@ -523,36 +537,104 @@ FILE_SPUNTE = {"piano": "piano.md", "scadenze": "scadenze.md"}
 
 
 def imposta_fatto(fonte, data, testo, fatto, cartella=None):
-    """Spunta o toglie la spunta alla voce di docs/<fonte>.md con questa data e questo testo; cambia solo la casella.
-    ValueError: fonte non prevista. LookupError: voce non trovata. RuntimeError: più voci uguali."""
-    if fonte not in FILE_SPUNTE:
-        raise ValueError(fonte)
+    imposta_stato(fonte, data, testo, "fatto" if fatto else "da_fare", cartella)
+
+
+def _trova_voce(righe, data, testo):
+    """Indice della riga della voce (anche già fatta, anche senza tag). LookupError: assente. RuntimeError("doppia"): più voci uguali."""
+    trovate = []
+    for i, riga in enumerate(righe):
+        v = VOCE_PIANO.match(riga.rstrip("\r\n"))
+        if not v:
+            continue
+        d = DATA_PIANO.match(v.group(2))
+        if (d.group(1) if d else None) == data and (d.group(2) if d else v.group(2)) == testo:
+            trovate.append(i)
+    if not trovate:
+        raise LookupError(testo)
+    if len(trovate) > 1:
+        raise RuntimeError("doppia")
+    return trovate[0]
+
+
+def imposta_stato(fonte, data, testo, stato, cartella=None):
+    """Mette la voce di docs/<fonte>.md con questa data e questo testo in stato da_fare, in_corso o fatto; cambia solo la casella.
+    ValueError: fonte o stato non previsti. LookupError: voce non trovata. RuntimeError: più voci uguali."""
+    if fonte not in FILE_SPUNTE or stato not in STATI:
+        raise ValueError(fonte if fonte not in FILE_SPUNTE else stato)
     file = (cartella or VAULT / "docs") / FILE_SPUNTE[fonte]
     with BLOCCO_PIANO:  # senza, due spunte insieme si cancellano a vicenda (o cancellano il file temporaneo dell'altra)
-        righe = file.read_text(encoding="utf-8").splitlines(keepends=True)
-        trovate = []
-        for i, riga in enumerate(righe):
-            v = VOCE_PIANO.match(riga.rstrip("\r\n"))
-            if not v:
-                continue
-            d = DATA_PIANO.match(v.group(2))
-            if (d.group(1) if d else None) == data and (d.group(2) if d else v.group(2)) == testo:
-                trovate.append(i)
-        if not trovate:
-            raise LookupError(testo)
-        if len(trovate) > 1:
-            raise RuntimeError(testo)
-        righe[trovate[0]] = "- [%s]%s" % ("x" if fatto else " ", righe[trovate[0]][5:])
-        # Scrittura atomica: un file temporaneo per chiamata e os.replace, così un errore a metà non lascia un piano troncato.
-        fd, nome_tmp = tempfile.mkstemp(dir=str(file.parent), suffix=".tmp")
-        tmp = Path(nome_tmp)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write("".join(righe))
-            os.chmod(tmp, file.stat().st_mode & 0o777)  # mkstemp crea 0600: il piano resta leggibile come prima
-            os.replace(tmp, file)
-        finally:
-            tmp.unlink(missing_ok=True)
+        with open(file, encoding="utf-8", newline="") as f:  # newline="": CRLF resta com'è
+            righe = f.read().splitlines(keepends=True)
+        i = _trova_voce(righe, data, testo)
+        righe[i] = righe[i][:3] + STATI[stato] + righe[i][4:]
+        _scrivi_atomico(file, righe)
+
+
+def _scrivi_atomico(file, righe):
+    """Scrittura atomica: un file temporaneo per chiamata e os.replace, così un errore a metà non lascia un piano troncato.
+    Da chiamare con BLOCCO_PIANO già preso."""
+    fd, nome_tmp = tempfile.mkstemp(dir=str(file.parent), suffix=".tmp")
+    tmp = Path(nome_tmp)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
+            f.write("".join(righe))
+        os.chmod(tmp, file.stat().st_mode & 0o777)  # mkstemp crea 0600: il piano resta leggibile come prima
+        os.replace(tmp, file)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+TAG_NUOVO = re.compile(r"[A-Za-z][\w-]*")
+CATEGORIE_VIETATE = ("Cc", "Cf", "Zl", "Zp", "Cs")  # controllo, formato (bidi, zero-width), separatori di riga, surrogati
+TESTO_MASSIMO = 200
+
+
+def aggiungi_voce(tag, testo, vault=None):
+    """Aggiunge `- [ ] #tag testo` a docs/piano.md e ritorna la riga: dopo l'ultima voce APERTA con lo stesso tag (le fatte stanno
+    magari in «Fatti»), altrimenti in fondo a «Prossimi giorni», altrimenti in fondo al file (con «## Prossimi giorni» se il file non ha sezioni). ValueError: tag o testo non validi, o tag di un progetto del lavoro.
+    RuntimeError("doppia"): la voce c'è già."""
+    vault = vault or VAULT
+    if not (isinstance(tag, str) and TAG_NUOVO.fullmatch(tag) and isinstance(testo, str)):
+        raise ValueError("tag o testo")
+    testo = testo.strip()
+    if (not testo or len(testo) > TESTO_MASSIMO or "<" in testo or ">" in testo
+            or any(unicodedata.category(c) in CATEGORIE_VIETATE for c in testo)):
+        raise ValueError("testo")
+    if progetti_indice(vault).get(tag.lower(), {}).get("lavoro"):
+        raise ValueError("lavoro")
+    file = vault / "docs" / "piano.md"
+    grezzo = "#%s %s" % (tag, testo)
+    with BLOCCO_PIANO:
+        with open(file, encoding="utf-8", newline="") as f:
+            righe = f.read().splitlines(keepends=True)
+        eol = "\r\n" if righe and righe[0].endswith("\r\n") else "\n"
+        voci = [(i, m.group(1), m.group(2)) for i, r in enumerate(righe) if (m := VOCE_PIANO.match(r.rstrip("\r\n")))]
+        if any(t.lower() == grezzo.lower() for _, _, t in voci):  # il tag conta senza maiuscole, come nel parser
+            raise RuntimeError("doppia")
+        stessa = [i for i, c, t in voci if c in " ~" and (m := TAG.search(t)) and m.group(1).lower() == tag.lower()]
+        if stessa:
+            pos = stessa[-1] + 1
+        else:
+            sez = next((i for i, r in enumerate(righe) if r.strip() == "## Prossimi giorni"), None)
+            pos = len(righe)
+            if sez is None and not any(SEZIONE.match(r.rstrip("\r\n")) for r in righe):  # senza sezioni il parser ignora le voci
+                if righe and not righe[-1].endswith("\n"):
+                    righe[-1] += eol
+                righe.append("## Prossimi giorni" + eol)
+                pos = len(righe)
+            if sez is not None:
+                pos = sez + 1
+                for i in range(sez + 1, len(righe)):
+                    if SEZIONE.match(righe[i].rstrip("\r\n")):
+                        break
+                    if VOCE_PIANO.match(righe[i].rstrip("\r\n")):
+                        pos = i + 1
+        if pos and not righe[pos - 1].endswith("\n"):
+            righe[pos - 1] += eol
+        righe.insert(pos, "- [ ] %s%s" % (grezzo, eol))
+        _scrivi_atomico(file, righe)
+    return "- [ ] " + grezzo
 
 
 def _momento(data):
@@ -589,6 +671,114 @@ def oggi(data, piano_file=None, scadenze_file=None):
             senza_data.append({"fonte": "progetto:" + p["nome"], "testo": p["primoPasso"]})
     con_data.sort(key=lambda c: c[0])
     return {"conData": [c for _, c in con_data], "senzaData": senza_data}
+
+
+MESI = "gen feb mar apr mag giu lug ago set ott nov dic".split()
+GIORNI = "lun mar mer gio ven sab dom".split()
+
+
+RIGA_LAVORO = re.compile(r"^\| \[\[projects" "/" "lavoro" r"/([^/\\|]+)/STATE")  # percorso spezzato: il template non lo contiene per intero
+
+
+def progetti_indice(vault):
+    """Nome minuscolo -> {nome, priorita, cartelle} dalle righe di INDEX e dalle righe `Repo:` degli STATE.
+    Decide dal percorso nell'INDEX: la cartella del lavoro non si legge mai."""
+    out = {}
+    for riga in (vault / "projects" / "INDEX.md").read_text(encoding="utf-8").splitlines():
+        celle = [c.strip() for c in riga.split("|")]  # il pipe del wikilink è escapato (\|): la priorità è la cella 5
+        w = RIGA_LAVORO.match(riga)
+        if w:  # solo il nome dalla riga dell'INDEX: nessun file del lavoro viene letto
+            out[w.group(1).lower()] = {"nome": w.group(1), "priorita": celle[5] if len(celle) > 5 else None, "cartelle": [], "lavoro": True}
+            continue
+        m = RIGA_PROGETTO.match(riga)
+        if not m or m.group(1) == "lavoro":
+            continue
+        nome = m.group(1)
+        stato = vault / "projects" / nome / "STATE.md"
+        repo = repo_di(stato.read_text(encoding="utf-8")) if stato.exists() else []
+        out[nome.lower()] = {"nome": nome, "priorita": celle[5] if len(celle) > 5 else None,
+                             "cartelle": [Path(r) for r in repo if r != "nessuno"]}
+    return out
+
+
+def _cartella_di(tipo, info, vault):
+    """Cartella di un nodo: prima del progetto che esiste, altrimenti il vault; None per i progetti del lavoro o se risolve nella loro cartella."""
+    lavoro = (vault / "projects" / "lavoro").resolve()
+    if (info or {}).get("lavoro"):
+        return None
+    scelta = vault if tipo != "progetto" else next((c for c in (info or {}).get("cartelle", []) if c.exists()), vault)
+    if scelta.resolve().is_relative_to(lavoro):  # resolve(): un symlink verso lavoro non passa
+        return None
+    return scelta
+
+
+def cartella_nodo(nodo, vault):
+    info = progetti_indice(vault).get(nodo["nome"].lower()) if nodo["tipo"] == "progetto" else None
+    return _cartella_di(nodo["tipo"], info, vault)
+
+
+def _str_o_none(p):
+    return None if p is None else str(p)
+
+
+def _prossima(aperte, adesso):
+    """Prima azione da fare: (nodo, voce, motivo) dal primo gradino che trova qualcosa, o None."""
+    for filtro, chiave, motivo in (
+        (lambda r: r[2], lambda r: r[3], lambda mo: "in ritardo dal %d %s" % (mo.day, MESI[mo.month - 1])),
+        (lambda r: r[1]["stato"] == "in_corso", None, lambda mo: "in corso"),
+        (lambda r: r[3] and r[3].date() <= adesso.date() + timedelta(days=7), lambda r: r[3],
+         lambda mo: "scade %s %d" % (GIORNI[mo.weekday()], mo.day)),
+        (lambda r: r[4], None, lambda mo: "priorità alta"),
+        (lambda r: True, None, lambda mo: "primo passo aperto"),
+    ):
+        trovate = [r for r in aperte if filtro(r)]
+        if trovate:
+            r = min(trovate, key=chiave) if chiave else trovate[0]  # min è stabile: a pari data vince l'ordine di file
+            return r[0], r[1], motivo(r[3])
+    return None
+
+
+def mappa(adesso, piano_file=None, vault=None):
+    """Nodi (progetti, argomenti, «Senza nodo») con i loro task di piano.md, prossima azione e conteggi."""
+    vault = vault or VAULT
+    indice = progetti_indice(vault)
+    def nuovo(i):
+        return {"nome": i["nome"], "tipo": "progetto", "priorita": i["priorita"],
+                "haCartella": _cartella_di("progetto", i, vault) is not None,
+                "cartella": _str_o_none(_cartella_di("progetto", i, vault)), "task": []}
+    nodi = {n: nuovo(i) for n, i in indice.items() if not i.get("lavoro")}  # i progetti del lavoro senza voci non compaiono
+    aperte = []  # (nome nodo, task, ritardo, momento, progetto alta), in ordine di file
+    for sez in leggi_sezioni(piano_file or vault / "docs" / "piano.md"):
+        for v in sez["voci"]:
+            if v["tag"] is None and v["stato"] == "fatto":
+                continue
+            chiave = v["tag"] or "senza nodo"
+            if chiave not in nodi and chiave in indice:  # progetto del lavoro con almeno una voce
+                nodi[chiave] = nuovo(indice[chiave])
+            if chiave not in nodi:
+                nodi[chiave] = {"nome": v["tag"] or "Senza nodo", "tipo": "argomento" if v["tag"] else "senza",
+                                "priorita": None, "haCartella": True, "cartella": str(vault), "task": []}
+            nodo = nodi[chiave]
+            momento = _momento(v["data"]) if v["data"] else None
+            momento = momento[0] if momento else None
+            aperta = v["stato"] != "fatto"
+            ritardo = bool(aperta and momento and momento < adesso)
+            t = {"data": v["data"], "testo": v["testo"], "vista": v["vista"], "stato": v["stato"], "ritardo": ritardo}
+            nodo["task"].append(t)
+            if aperta:
+                aperte.append((nodo, t, ritardo, momento, nodo["priorita"] == "alta"))
+    scelta = _prossima(aperte, adesso)
+    prossima = None
+    if scelta:
+        n, t, motivo = scelta
+        prossima = {"nodo": n["nome"], "data": t["data"], "testo": t["testo"], "vista": t["vista"], "stato": t["stato"], "motivo": motivo}
+    conta = lambda f: sum(1 for r in aperte if f(r))
+    aperti = lambda n: sum(1 for t in n["task"] if t["stato"] != "fatto")
+    ordinati = sorted(nodi.values(), key=lambda n: (not (scelta and n is scelta[0]), -aperti(n), n["nome"].lower()))
+    return {"nodi": ordinati, "prossima": prossima,
+            "conteggi": {"da_fare": conta(lambda r: r[1]["stato"] == "da_fare"),
+                         "in_corso": conta(lambda r: r[1]["stato"] == "in_corso"),
+                         "in_ritardo": conta(lambda r: r[2])}}
 
 
 def ultimo_controllo_skill():
@@ -697,6 +887,68 @@ def avvia(nome, esegui=subprocess.Popen):
         PROCESSI[nome] = esegui(comando, cwd=str(VAULT), stdout=log,
                                 stderr=subprocess.STDOUT, env=ambiente_azione(), start_new_session=True)
     return {"avviato": nome}
+
+
+ULTIMI_AVVII = {}  # (data, testo) -> momento dell'ultimo avvio: ignora il doppio clic
+BLOCCO_AVVII = threading.Lock()
+
+
+def avvia_claude(data, testo, esegui=None, piano_file=None, vault=None, cartella_avvii=None, sistema=None, adesso=time.monotonic):
+    """Apre il Terminale con `claude` nella cartella del nodo della voce e la mette in corso. Solo macOS.
+    NotImplementedError: non è un Mac. LookupError: voce assente. RuntimeError con codice: doppia, cartella, ripetuto, apertura.
+    Il testo della voce finisce solo in un file letto da `cat`: mai in una stringa di shell o di AppleScript."""
+    if (sistema or sys.platform) != "darwin":
+        raise NotImplementedError("solo macOS")
+    esegui = esegui or subprocess.run
+    vault = vault or VAULT
+    piano_file = piano_file or vault / "docs" / "piano.md"
+    trovati = [(n, t) for n in mappa(datetime.now(), piano_file, vault)["nodi"] for t in n["task"] if t["data"] == data and t["testo"] == testo]
+    if not trovati:
+        raise LookupError(testo)
+    if len(trovati) > 1:
+        raise RuntimeError("doppia")
+    nodo, task = trovati[0]
+    cartella = cartella_nodo(nodo, vault)
+    if cartella is None:
+        raise RuntimeError("cartella")
+    with open(piano_file, encoding="utf-8", newline="") as f:  # prima di scrivere o aprire qualsiasi cosa: il file grezzo vede anche i [x] senza tag
+        _trova_voce(f.read().splitlines(keepends=True), data, testo)
+    chiave = (data, testo)
+    with BLOCCO_AVVII:
+        if chiave in ULTIMI_AVVII and adesso() - ULTIMI_AVVII[chiave] < 10:
+            raise RuntimeError("ripetuto")
+        ULTIMI_AVVII[chiave] = adesso()
+    try:
+        cartella_avvii = cartella_avvii or percorsi.cartella_log() / "avvii-claude"
+        cartella_avvii.mkdir(mode=0o700, parents=True, exist_ok=True)
+        for f in cartella_avvii.iterdir():  # file di avvii vecchi di una settimana
+            if f.is_file() and f.stat().st_mtime < time.time() - 7 * 86400:
+                f.unlink()
+        base = cartella_avvii / datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        file_prompt, file_comando = base.with_suffix(".txt"), base.with_suffix(".command")
+        prompt = ("Task dal piano del vault (nodo #%s): %s. Lavoraci in questa cartella seguendo le regole del progetto; "
+                  "quando hai finito dimmelo, la spunta la metto io dalla dashboard.") % (nodo["nome"], task["vista"])
+        for file, contenuto, modo in (
+                (file_prompt, prompt, 0o600),
+                (file_comando, "#!/bin/zsh -l\ncd %s && exec claude \"$(cat %s)\"\n" % (shlex.quote(str(cartella)), shlex.quote(str(file_prompt))), 0o700)):
+            fd = os.open(file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, modo)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(contenuto)
+        try:
+            r = esegui(["/usr/bin/open", "-a", "Terminal", str(file_comando)], check=False, timeout=10)
+        except subprocess.SubprocessError:
+            raise RuntimeError("apertura")
+        if r.returncode != 0:
+            raise RuntimeError("apertura")
+    except BaseException:
+        ULTIMI_AVVII.pop(chiave, None)  # un avvio fallito si può riprovare subito
+        raise
+    out = {"avviato": True, "cartella": str(cartella)}
+    try:
+        imposta_stato("piano", data, testo, "in_corso", piano_file.parent)
+    except (LookupError, RuntimeError, OSError):  # il Terminale è già aperto: il debounce resta, la spunta no
+        out["avviso"] = "stato"
+    return out
 
 
 def esecuzioni():
@@ -1056,9 +1308,11 @@ ROTTE_JSON = {
     "/api/post": lambda: post_calendari(),
     "/api/avvii": lambda: avvii(),
     "/api/bozze": lambda: bozze_per_rete(),
+    "/api/mappa": lambda: mappa(datetime.now()),
 }
 # Le sole risorse statiche servite: il nome non viene mai dal percorso della richiesta
 STATICI = {"/dashboard.js": ("dashboard.js", "text/javascript; charset=utf-8"),
+           "/mappa.js": ("mappa.js", "text/javascript; charset=utf-8"),
            "/dashboard.css": ("dashboard.css", "text/css; charset=utf-8")}
 
 
@@ -1072,6 +1326,9 @@ class Gestore(BaseHTTPRequestHandler):
         percorso = self.path.split("?", 1)[0]
         if percorso == "/api/spunte":
             self._spunta()
+            return
+        if percorso in ("/api/mappa/stato", "/api/mappa/avvia", "/api/mappa/nuovo"):
+            self._mappa_scrive(percorso.rsplit("/", 1)[1])
             return
         if percorso == "/api/radar/feedback":
             self._vota()
@@ -1135,6 +1392,45 @@ class Gestore(BaseHTTPRequestHandler):
             self.send_error(500)
             return
         self._json({"fatto": fatto})
+
+    def _mappa_scrive(self, azione):
+        """azione: «stato», «avvia» o «nuovo»."""
+        try:
+            corpo = self._corpo_json()
+            data, testo = corpo.get("data"), corpo["testo"]
+            stato_nuovo = corpo["stato"] if azione == "stato" else None
+            tag = corpo["tag"] if azione == "nuovo" else None
+            valido = (isinstance(testo, str) and (data is None or isinstance(data, str))
+                      and (azione != "stato" or isinstance(stato_nuovo, str)) and (azione != "nuovo" or isinstance(tag, str)))
+        except (KeyError, TypeError, AttributeError):
+            valido = False
+        if not valido:
+            self.send_error(400)
+            return
+        try:
+            if azione == "avvia":
+                esito = avvia_claude(data, testo)
+            elif azione == "nuovo":
+                esito = {"ok": True, "riga": aggiungi_voce(tag, testo)}
+            else:
+                imposta_stato("piano", data, testo, stato_nuovo)
+                esito = {"ok": True}
+        except ValueError:
+            self.send_error(400)
+            return
+        except NotImplementedError:
+            self.send_error(501)
+            return
+        except LookupError:
+            self.send_error(404)
+            return
+        except RuntimeError as e:
+            self._json({"errore": str(e)}, 409)
+            return
+        except OSError:
+            self.send_error(500)
+            return
+        self._json(esito)
 
     def _vota(self):
         try:

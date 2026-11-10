@@ -10,32 +10,44 @@
 <body>
 <aside class="rail" id="rail">
   <div class="marchio">
-    <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><g stroke="var(--accent)" stroke-width="1.6" fill="none"><path d="M6 17 13 7l7 10M6 17h14"/></g><g fill="var(--accent)"><circle cx="6" cy="17" r="2.6"/><circle cx="13" cy="7" r="2.6"/><circle cx="20" cy="17" r="2.6"/></g></svg>
+    <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><g stroke="var(--muted)" stroke-width="1.6" fill="none"><path d="M6 17 13 7l7 10M6 17h14"/></g><g><circle fill="var(--todo)" cx="6" cy="17" r="2.6"/><circle fill="var(--doing)" cx="13" cy="7" r="2.6"/><circle fill="var(--done)" cx="20" cy="17" r="2.6"/></g></svg>
     <div><b>Second brain</b><span>Vault personale</span></div>
     <button type="button" class="menu" id="menu" aria-expanded="false" aria-controls="schede">Menu</button>
   </div>
   <nav class="schede" id="schede" aria-label="Sezioni">
-    <button type="button" aria-current="page" data-vista="oggi">Oggi</button>
-    <div class="gruppo">Lavoro</div>
-    <button type="button" data-vista="progetti">Progetti</button>
-    <button type="button" data-vista="piano">Piano</button>
-    <button type="button" data-vista="radar" data-modulo="radar">Radar</button>
-    <div class="gruppo">Pubblicazione</div>
+    <button type="button" aria-current="page" data-vista="mappa">Mappa</button>
+    <button type="button" data-vista="agenda">Agenda</button>
+    <div class="gruppo">Contenuti</div>
     <button type="button" data-vista="post" data-modulo="bozze">Post<span class="conteggio-menu" id="post-badge" hidden></span></button>
+    <button type="button" data-vista="radar" data-modulo="radar">Radar</button>
     <div class="gruppo">Risorse</div>
-    <button type="button" data-vista="servizi" data-modulo="servizi">Servizi</button>
-    <button type="button" data-vista="claude">Uso di Claude</button>
-    <button type="button" data-vista="prestazioni" data-modulo="radar assistente">Modello locale</button>
+    <button type="button" data-vista="consumi">Consumi</button>
     <div class="gruppo">Sistema</div>
     <button type="button" data-vista="avvii">Avvii</button>
     <button type="button" data-vista="configurazione">Configurazione</button>
   </nav>
-  <span class="fresco" id="fresco">caricamento…</span>
+  <div class="piede-menu">
+    <span class="fresco" id="fresco">caricamento…</span>
+    <button type="button" id="tema" aria-label="Cambia tema">Tema scuro</button>
+  </div>
 </aside>
 
 <main>
-  <h1 id="pagina">Oggi</h1>
-  <div id="oggi-vista">
+  <h1 id="pagina">Mappa</h1>
+  <div id="mappa-vista">
+    <div id="mappa-saluto"></div>
+    <div id="mappa-area"></div>
+    <aside id="mappa-pannello">
+      <section id="mappa-dettaglio"></section>
+      <section id="aspetta-te">
+        <h2>Aspetta te<span class="sub">cosa chiede una tua decisione adesso</span></h2>
+        <div id="aspetta-te-lista"><p class="vuoto">caricamento…</p></div>
+      </section>
+      <section id="prossimi-giorni"></section>
+    </aside>
+  </div>
+
+  <div id="agenda-vista" hidden>
     <div class="titolo">
       <div>
         <p class="sub" id="data-oggi"></p>
@@ -43,10 +55,6 @@
       </div>
       <button type="button" data-vai="avvii">Vedi gli avvii</button>
     </div>
-    <section>
-      <h2>Aspetta te<span class="sub">cosa chiede una tua decisione adesso</span></h2>
-      <div id="aspetta-te"><p class="vuoto">caricamento…</p></div>
-    </section>
     <ul class="riepilogo">
       <li><b id="kpi-radar" class="dato">–</b><span>novità da leggere</span></li>
       <li><b id="kpi-bozze">–</b><span>bozze da pubblicare</span></li>
@@ -61,10 +69,6 @@
     <section>
       <h2>Novità da leggere<button type="button" data-vai="radar">Apri il radar</button></h2>
       <div id="aspetta-novita"></div>
-    </section>
-    <section>
-      <h2>Il prossimo passo dei progetti</h2>
-      <div id="oggi-progetti"></div>
     </section>
     <section id="assistente">
       <details class="chiedi" open>
@@ -85,23 +89,15 @@
     </section>
   </div>
 
-  <div id="progetti-vista" hidden>
-    <div class="titolo"><div><p class="sub">Dove sei, cosa è cambiato e cosa blocca, per ogni progetto.</p></div></div>
-    <div id="progetti" class="griglia-progetti"></div>
-  </div>
 
   <div id="radar-vista" hidden>
     <div class="titolo"><div><p class="sub">Novità dei feed, filtrate sui tuoi progetti.</p></div></div>
     <div id="radar"></div>
   </div>
 
-  <div id="piano-vista" hidden>
-    <div class="titolo"><div><p class="sub">Spunta le voci qui o in Oggi: la casella si salva in docs/piano.md.</p></div></div>
-    <ul class="riepilogo" id="piano-kpi"></ul>
-    <div id="piano-sezioni"></div>
-  </div>
-
-  <div id="servizi-vista" hidden>
+  <div id="consumi-vista" hidden>
+    <div class="blocco" id="consumi-servizi" data-modulo="servizi">
+      <h2>Servizi</h2>
     <div class="titolo"><div><p class="sub">Dove gira ogni progetto, a che piano, con quali limiti e quanto ne usa.</p></div></div>
     <div id="servizi-scelta" class="scelta"></div>
     <ul class="riepilogo" id="servizi-kpi"></ul>
@@ -110,13 +106,34 @@
     <section><h2>Quando conviene passare a pagamento</h2><div id="servizi-pagamento"></div></section>
     <section><h2>Piani e prezzi</h2><div id="servizi-piani"></div></section>
     <p class="sub">Dati di <code>docs/servizi.md</code>, compilati a mano con la data di misura: non sono consumi in tempo reale. Senza una soglia indicata, si agisce al 70% del limite. La proiezione è lineare: ritmo medio del periodo fino alla data di misura, quindi è una stima.</p>
-  </div>
-
-  <div id="claude-vista" hidden>
+    </div>
+    <div class="blocco" id="consumi-claude">
+      <h2>Uso di Claude</h2>
     <div class="titolo"><div><p class="sub">Quanta parte della finestra di 5 ore e della settimana hai già usato, e quanto tempo è passato.</p></div></div>
     <div id="p-claude" class="finestre"></div>
     <p class="sub" id="p-claude-nota"></p>
     <section><h2>Lavoro di Claude Code, giorno per giorno</h2><div id="p-consumo"></div></section>
+    </div>
+    <div class="blocco" id="consumi-locale" data-modulo="radar assistente">
+      <h2>Modello locale</h2>
+    <div class="titolo"><div><p class="sub">Il modello locale: memoria, velocità e chiamate del radar.</p></div></div>
+    <ul class="riepilogo">
+      <li><b id="p-modelli">–</b><span>modelli in memoria</span></li>
+      <li><b id="p-swap">–</b><span>MB di swap in uso</span></li>
+      <li><b id="p-chiamate">–</b><span>chiamate registrate</span></li>
+      <li><b id="p-velocita" class="dato">–</b><span>token al secondo, giudizio</span></li>
+    </ul>
+    <section>
+      <h2>Modelli installati<span class="sub" id="p-disco"></span></h2>
+      <div id="p-installati"></div>
+      <div class="riga-azioni" id="p-scarica"></div>
+    </section>
+    <section><h2>Sistema</h2><div id="sistema"></div></section>
+    <section><h2>Modelli e processi</h2><div id="p-modelli-tab"></div></section>
+    <section><h2>Chiamate per operazione</h2><div id="p-operazioni"></div></section>
+    <section><h2>Velocità dei giudizi</h2><div id="p-ultime"></div></section>
+    <p class="sub">Le chiamate si registrano quando gira il radar. Prima della prima esecuzione le tabelle restano vuote.</p>
+    </div>
   </div>
 
   <div id="post-vista" hidden>
@@ -147,26 +164,6 @@
     <section><h2>Job pianificati</h2><div id="avvii-contenuto"></div></section>
     <section><h2>Avvii a mano e log</h2><div id="esecuzioni"></div></section>
     <section><h2>Servizi e vault</h2><div id="jobvault"></div></section>
-  </div>
-
-  <div id="prestazioni-vista" hidden>
-    <div class="titolo"><div><p class="sub">Il modello locale: memoria, velocità e chiamate del radar.</p></div></div>
-    <ul class="riepilogo">
-      <li><b id="p-modelli">–</b><span>modelli in memoria</span></li>
-      <li><b id="p-swap">–</b><span>MB di swap in uso</span></li>
-      <li><b id="p-chiamate">–</b><span>chiamate registrate</span></li>
-      <li><b id="p-velocita" class="dato">–</b><span>token al secondo, giudizio</span></li>
-    </ul>
-    <section>
-      <h2>Modelli installati<span class="sub" id="p-disco"></span></h2>
-      <div id="p-installati"></div>
-      <div class="riga-azioni" id="p-scarica"></div>
-    </section>
-    <section><h2>Sistema</h2><div id="sistema"></div></section>
-    <section><h2>Modelli e processi</h2><div id="p-modelli-tab"></div></section>
-    <section><h2>Chiamate per operazione</h2><div id="p-operazioni"></div></section>
-    <section><h2>Velocità dei giudizi</h2><div id="p-ultime"></div></section>
-    <p class="sub">Le chiamate si registrano quando gira il radar. Prima della prima esecuzione le tabelle restano vuote.</p>
   </div>
 
   <div id="configurazione-vista" hidden>
@@ -202,6 +199,7 @@
   <button type="button" id="lightbox-chiudi">Chiudi</button>
 </dialog>
 
+<script src="/mappa.js" defer></script>
 <script src="/dashboard.js" defer></script>
 </body>
 </html>
