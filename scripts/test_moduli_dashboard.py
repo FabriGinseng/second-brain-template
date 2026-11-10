@@ -38,7 +38,7 @@ class ModelloAssistenteTest(unittest.TestCase):
         # se si passa a Claude la pagina continuerebbe a dire «locale» mentre i dati vanno nel cloud
         self.assertNotIn("Risposta del modello locale", HTML)
         self.assertNotIn("modello locale, risponde in sola lettura", HTML)
-        self.assertIn('id="assistente-modello"', HTML)
+        self.assertIn("$('assistente-domanda').title = etichettaModello()", HTML)  # l'aiuto sta nella casella di Chiedi, non in una riga a parte
 
 
 class CalendarioAlModelloTest(unittest.TestCase):
@@ -81,7 +81,7 @@ class PagineDeiModuliTest(unittest.TestCase):
         for v in ("mappa", "agenda", "consumi", "avvii", "configurazione"):
             self.assertEqual(voci[v], "", v)  # le pagine di base non dipendono da un modulo
         # in Consumi si nascondono le sezioni dei moduli, non la pagina
-        sezioni = dict(re.findall(r'id="(consumi-(?!vista)\w+)"(?: data-modulo="([\w ]+)")?', HTML))
+        sezioni = dict(re.findall(r'id="(consumi-(?!vista|dato|schede)\w+)"(?: data-modulo="([\w ]+)")?', HTML))
         self.assertEqual(sezioni, {"consumi-servizi": "servizi", "consumi-claude": "", "consumi-locale": "radar assistente"})
         voci.update({k: v for k, v in sezioni.items() if v})
         nomi = set(server.MODULI_NOTI)

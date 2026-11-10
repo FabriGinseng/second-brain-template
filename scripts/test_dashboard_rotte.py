@@ -24,7 +24,7 @@ FORME = {
     "/api/esecuzioni": ("dict", ["bozze", "chiudi-giornata", "commit", "controllo-skill", "morning", "pulizia", "radar", "richieste"]),
     "/api/servizi": ("list", None), "/api/post/aperte": ("dict", ["aperte"]), "/api/post": ("list", None),
     "/api/avvii": ("dict", ["job", "macAcceso"]), "/api/bozze": ("dict", ["instagram", "linkedin"]),
-    "/api/mappa": ("dict", ["conteggi", "nodi", "prossima"]),
+    "/api/mappa": ("dict", ["conteggi", "nodi", "nome", "prossima"]),
 }
 
 

@@ -48,75 +48,48 @@
   </div>
 
   <div id="agenda-vista" hidden>
-    <div class="titolo">
-      <div>
-        <p class="sub" id="data-oggi"></p>
-        <p class="trovato" id="oggi-fatto"></p>
-      </div>
-      <button type="button" data-vai="avvii">Vedi gli avvii</button>
-    </div>
-    <ul class="riepilogo">
-      <li><b id="kpi-radar" class="dato">–</b><span>novità da leggere</span></li>
-      <li><b id="kpi-bozze">–</b><span>bozze da pubblicare</span></li>
-      <li><b id="kpi-skill">–</b><span>skill da aggiornare</span></li>
-    </ul>
+    <div class="titolo"><p class="dato" id="agenda-dato">caricamento…</p><button type="submit" class="primario" form="assistente-form">Chiedi</button></div>
+    <form id="assistente-form" class="barra-chiedi">
+      <input type="text" id="assistente-domanda" maxlength="400" placeholder="Chiedi, o scrivi: Aggiungi dentista martedì 15" aria-label="Chiedi all'assistente, oppure scrivi Aggiungi e un appuntamento" autocomplete="off">
+    </form>
+    <p class="testo-assistente" id="assistente-risposta" aria-live="polite"></p>
+    <p class="sub" id="assistente-nota"></p>
+    <div id="appuntamento-scheda"></div>
+    <p class="dato-link" id="agenda-radar" hidden><button type="button" class="link" data-vai="radar"></button></p>
     <section>
-      <h2>Cosa mi aspetta<span class="sub">prossimi 7 giorni</span></h2>
-      <div id="aspetta"><p class="vuoto">caricamento…</p></div>
-      <p class="sub" id="aspetta-calendario"></p>
+      <h2>Cosa mi aspetta</h2>
+      <div id="aspetta"><p class="cornice">Sto leggendo l'agenda…</p></div>
       <div id="oggi"></div>
-    </section>
-    <section>
-      <h2>Novità da leggere<button type="button" data-vai="radar">Apri il radar</button></h2>
-      <div id="aspetta-novita"></div>
-    </section>
-    <section id="assistente">
-      <details class="chiedi" open>
-        <summary><h2>Chiedi<span class="sub" id="assistente-modello">risponde in sola lettura</span></h2></summary>
-        <form id="assistente-form" class="riga-azioni">
-          <input type="text" id="assistente-domanda" maxlength="400" placeholder="Cosa devo fare oggi?" aria-label="Domanda all'assistente" autocomplete="off">
-          <button type="submit" class="primario">Chiedi</button>
-        </form>
-        <div class="riga-azioni" id="assistente-chip"></div>
-        <p class="testo-assistente" id="assistente-risposta" aria-live="polite"></p>
-        <p class="sub" id="assistente-nota"></p>
-        <form id="appuntamento-form" class="riga-azioni">
-          <input type="text" id="appuntamento-frase" maxlength="400" placeholder="Aggiungi: dentista martedì alle 15" aria-label="Appuntamento da aggiungere" autocomplete="off">
-          <button type="submit">Prepara</button>
-        </form>
-        <div id="appuntamento-scheda"></div>
-      </details>
+      <p class="sub" id="aspetta-calendario"></p>
     </section>
   </div>
 
-
   <div id="radar-vista" hidden>
-    <div class="titolo"><div><p class="sub">Novità dei feed, filtrate sui tuoi progetti.</p></div></div>
+    <div class="titolo"><p class="dato" id="radar-dato">caricamento…</p><button type="button" class="primario" id="radar-aggiorna" data-azione="radar">Aggiorna il radar</button></div>
     <div id="radar"></div>
   </div>
 
   <div id="consumi-vista" hidden>
-    <div class="blocco" id="consumi-servizi" data-modulo="servizi">
-      <h2>Servizi</h2>
-    <div class="titolo"><div><p class="sub">Dove gira ogni progetto, a che piano, con quali limiti e quanto ne usa.</p></div></div>
-    <div id="servizi-scelta" class="scelta"></div>
-    <ul class="riepilogo" id="servizi-kpi"></ul>
-    <section><h2>Come gira</h2><div id="servizi-schema" class="schema"></div></section>
-    <section><h2>Consumi e limiti</h2><div id="servizi-misure"></div></section>
-    <section><h2>Quando conviene passare a pagamento</h2><div id="servizi-pagamento"></div></section>
-    <section><h2>Piani e prezzi</h2><div id="servizi-piani"></div></section>
-    <p class="sub">Dati di <code>docs/servizi.md</code>, compilati a mano con la data di misura: non sono consumi in tempo reale. Senza una soglia indicata, si agisce al 70% del limite. La proiezione è lineare: ritmo medio del periodo fino alla data di misura, quindi è una stima.</p>
-    </div>
+    <div class="titolo"><p class="dato" id="consumi-dato">caricamento…</p></div>
+    <div id="consumi-schede"></div>
     <div class="blocco" id="consumi-claude">
-      <h2>Uso di Claude</h2>
-    <div class="titolo"><div><p class="sub">Quanta parte della finestra di 5 ore e della settimana hai già usato, e quanto tempo è passato.</p></div></div>
+    <p class="sub">Quanta parte della finestra di 5 ore e della settimana hai già usato, e quanto tempo è passato.</p>
     <div id="p-claude" class="finestre"></div>
     <p class="sub" id="p-claude-nota"></p>
     <section><h2>Lavoro di Claude Code, giorno per giorno</h2><div id="p-consumo"></div></section>
     </div>
+    <div class="blocco" id="consumi-servizi" data-modulo="servizi">
+    <p class="sub">Dove gira ogni progetto, a che piano, con quali limiti e quanto ne usa.</p>
+    <div id="servizi-scelta" class="scelta minore"></div>
+    <ul class="riepilogo" id="servizi-kpi"></ul>
+    <section><h2>Consumi e limiti</h2><div id="servizi-misure"></div></section>
+    <details class="resto"><summary>Come gira</summary><div id="servizi-schema" class="schema"></div></details>
+    <details class="resto"><summary>Quando conviene passare a pagamento</summary><div id="servizi-pagamento"></div></details>
+    <details class="resto"><summary>Piani e prezzi</summary><div id="servizi-piani"></div></details>
+    <p class="sub">Dati di <code>docs/servizi.md</code>, compilati a mano con la data di misura: non sono consumi in tempo reale. Senza una soglia indicata, si agisce al 70% del limite. La proiezione è lineare: ritmo medio del periodo fino alla data di misura, quindi è una stima.</p>
+    </div>
     <div class="blocco" id="consumi-locale" data-modulo="radar assistente">
-      <h2>Modello locale</h2>
-    <div class="titolo"><div><p class="sub">Il modello locale: memoria, velocità e chiamate del radar.</p></div></div>
+    <p class="sub">Il modello locale: memoria, velocità e chiamate del radar.</p>
     <ul class="riepilogo">
       <li><b id="p-modelli">–</b><span>modelli in memoria</span></li>
       <li><b id="p-swap">–</b><span>MB di swap in uso</span></li>
@@ -128,24 +101,25 @@
       <div id="p-installati"></div>
       <div class="riga-azioni" id="p-scarica"></div>
     </section>
-    <section><h2>Sistema</h2><div id="sistema"></div></section>
-    <section><h2>Modelli e processi</h2><div id="p-modelli-tab"></div></section>
-    <section><h2>Chiamate per operazione</h2><div id="p-operazioni"></div></section>
-    <section><h2>Velocità dei giudizi</h2><div id="p-ultime"></div></section>
+    <details class="resto"><summary>Sistema, processi e chiamate</summary>
+      <section><h2>Sistema</h2><div id="sistema"></div></section>
+      <section><h2>Modelli e processi</h2><div id="p-modelli-tab"></div></section>
+      <section><h2>Chiamate per operazione</h2><div id="p-operazioni"></div></section>
+      <section><h2>Velocità dei giudizi</h2><div id="p-ultime"></div></section>
+    </details>
     <p class="sub">Le chiamate si registrano quando gira il radar. Prima della prima esecuzione le tabelle restano vuote.</p>
     </div>
   </div>
 
   <div id="post-vista" hidden>
-    <div class="titolo"><div><p class="sub" id="post-sub">Il calendario dei post di ogni progetto: cosa pubblicare, quando e con quali immagini.</p></div><button type="button" class="primario" id="chiedi-post">Chiedi un post</button></div>
+    <div class="titolo"><p class="dato" id="post-dato">caricamento…</p><button type="button" class="primario" id="chiedi-post">Chiedi un post</button></div>
     <div class="scelta" id="post-schede">
       <button type="button" data-scheda="calendario" aria-pressed="true">Calendario</button>
       <button type="button" data-scheda="bozze" aria-pressed="false">Bozze della settimana</button>
     </div>
     <div id="post-calendario">
-    <div id="post-scelta" class="scelta"></div>
+    <div class="filtri-riga"><div id="post-scelta" class="scelta"></div><div id="post-filtri" class="scelta"></div></div>
     <ul class="riepilogo" id="post-kpi"></ul>
-    <div id="post-filtri" class="scelta"></div>
     <div id="post-agenda"></div>
     <section><h2>Le mie richieste</h2><div id="post-richieste"></div></section>
     <p class="sub" id="post-nota"></p>
@@ -158,18 +132,19 @@
   </div>
 
   <div id="avvii-vista" hidden>
-    <div class="titolo">
-      <div><p class="sub" id="avvii-mac"></p></div>
-    </div>
-    <section><h2>Job pianificati</h2><div id="avvii-contenuto"></div></section>
-    <section><h2>Avvii a mano e log</h2><div id="esecuzioni"></div></section>
-    <section><h2>Servizi e vault</h2><div id="jobvault"></div></section>
+    <div class="titolo"><p class="dato" id="avvii-dato">caricamento…</p></div>
+    <div id="avvii-contenuto"></div>
+    <section class="piccola"><h2>Servizi e vault</h2><div id="jobvault"></div></section>
+    <p class="sub" id="avvii-mac"></p>
   </div>
 
   <div id="configurazione-vista" hidden>
-    <div class="titolo"><div><p class="sub">Skill, plugin, hook e server MCP, globali e per progetto.</p></div></div>
+    <div class="titolo"><p class="dato" id="conf-dato">caricamento…</p><div id="conf-azioni"></div></div>
+    <div id="conf-schede"></div>
     <div id="conf-contenuto"></div>
-    <p class="sub">Solo nomi, versioni e date: la pagina non legge mai chiavi o variabili dei server MCP. I connettori di claude.ai (per esempio Claude Docs e Figma) non compaiono tra i file locali, quindi non sono in elenco.</p>
+    <details class="resto"><summary>Cosa non si vede qui</summary>
+      <p class="sub">Solo nomi, versioni e date: la pagina non legge mai chiavi o variabili dei server MCP. I connettori di claude.ai (per esempio Claude Docs e Figma) non compaiono tra i file locali, quindi non sono in elenco.</p>
+    </details>
   </div>
 </main>
 
@@ -200,6 +175,7 @@
 </dialog>
 
 <script src="/mappa.js" defer></script>
+<script src="/componenti.js" defer></script>
 <script src="/dashboard.js" defer></script>
 </body>
 </html>
