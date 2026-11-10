@@ -10,7 +10,7 @@ Un kit di partenza per un "second brain" personale: un vault Obsidian di Markdow
 
 - **Progetti**: un breve `STATE.md` per progetto, riscritto (mai appeso), un `decisions.md` datato e una riga in `projects/INDEX.md`.
 - **Regole che l'agente segue**: un `CLAUDE.md` corto, le decisioni in `docs/adr/` (note riservate, livello di autonomia), un glossario.
-- **Permessi che sostengono le regole**: `.claude/settings.json` blocca push, force-push, riscrittura della storia e la cartella riservata.
+- **Regole applicate da un hook**: `.claude/hooks/regole.py` con l'elenco `regole.json` (ADR-012) chiede conferma per push, PR, deploy e `rm` e rifiuta force-push e riscrittura della storia, in ogni repo dopo `scripts/installa-regole.py` (il setup lo propone). `.claude/settings.json` protegge la cartella riservata.
 - **Un controllo**: `scripts/verify` verifica le regole del vault. Nessun modello, solo file.
 - **Comandi e subagenti** in `.claude/`: vedi «Comandi». I testi dei comandi sono in italiano nella v0.1.
 - **Una dashboard locale** (libreria standard di Python, solo `127.0.0.1`): progetti, piano, oggi, radar, servizi e limiti, post e un pannello dell'assistente. Mostra solo le pagine dei moduli che hai scelto.

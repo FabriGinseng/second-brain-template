@@ -97,6 +97,7 @@ GUIDA = {
         "ollama_spento": "Ollama is installed but not running. Start it (the Ollama app, or: ollama serve), then run: %s",
         "scarica": "Download %s (about %.1f GB)?", "poco_disco": "Not enough free disk for %s (about %.1f GB): skipped. Free some space and run: ollama pull %s",
         "hook": "Turn on the secret scan before each commit? It runs: git config core.hooksPath scripts/hooks",
+        "regole": "Turn on the rules for Claude Code in every repo? push, PR, deploy and rm ask first; force-push, reset --hard and clean are refused (ADR-012). It runs: %s --si\n    (it copies two files to ~/.claude/hooks and adds a hook to %s, keeping a copy of the file)",
         "statusline": "Show your Claude usage in the dashboard? It adds this status line to %s (a copy of the file is kept first):\n    %s",
         "statusline_ok": "Status line added.", "statusline_c_e": "You already have a status line there: I left it as it is (README, \"When a page is empty\").",
         "statusline_no": "I could not read %s as JSON: I left it alone. Add the status line by hand (README, \"When a page is empty\").",
@@ -114,6 +115,7 @@ GUIDA = {
         "ollama_spento": "Ollama è installato ma non è acceso. Avvialo (l'app Ollama, oppure: ollama serve), poi lancia: %s",
         "scarica": "Scarico %s (circa %.1f GB)?", "poco_disco": "Poco spazio libero sul disco per %s (circa %.1f GB): saltato. Libera spazio e lancia: ollama pull %s",
         "hook": "Attivo il controllo dei segreti prima di ogni commit? Lancia: git config core.hooksPath scripts/hooks",
+        "regole": "Attivo le regole di Claude Code in ogni repo? push, PR, deploy e rm chiedono conferma; force-push, reset --hard e clean sono rifiutati (ADR-012). Lancia: %s --si\n    (copia due file in ~/.claude/hooks e aggiunge un hook a %s, tenendo una copia del file)",
         "statusline": "Mostro l'uso di Claude nella dashboard? Aggiunge questa barra di stato a %s (prima ne tengo una copia):\n    %s",
         "statusline_ok": "Barra di stato aggiunta.", "statusline_c_e": "Lì c'è già una barra di stato: l'ho lasciata com'è (README, «Quando una pagina è vuota»).",
         "statusline_no": "Non riesco a leggere %s come JSON: l'ho lasciato stare. Aggiungi la barra di stato a mano (README, «Quando una pagina è vuota»).",
@@ -193,6 +195,10 @@ def passi_guidati(attivi, lingua, radice, si, esegui=sistema.esegui, scan=None, 
     if si(g["statusline"] % (impostazioni, comando), False):
         esito = sistema.aggiungi_statusline(impostazioni, comando)
         print("  " + {"aggiunta": g["statusline_ok"], "gia-presente": g["statusline_c_e"], "illeggibile": g["statusline_no"] % impostazioni}[esito])
+    regole = radice / "scripts" / "installa-regole.py"
+    if regole.exists() and si(g["regole"] % (regole, impostazioni), False):
+        codice = esegui([sys.executable, "-I", str(regole), "--si"])
+        print("  " + (g["ok"] if codice == 0 else g["fallito"] % (codice, "%s -I %s" % (sys.executable, regole))))
     if (radice / "install_jobs.py").exists() and si(g["jobs"], False):
         esegui([sys.executable, str(radice / "install_jobs.py")])
     if "radar" in attivi and (radice / "scripts" / "feed.py").exists() and si(g["radar"], False):
