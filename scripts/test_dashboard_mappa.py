@@ -228,7 +228,8 @@ class AvvioTest(unittest.TestCase):
             self.assertIn(ostile, txt)
             self.assertIn("(nodo #alfa)", txt)
             self.assertEqual(r["cartella"], str(v / "repo-alfa"))
-            self.assertEqual(os.stat(args[3]).st_mode & 0o777, 0o700)
+            if os.name == "posix":  # su Windows i permessi non esistono (e «Avvia» è solo per macOS)
+                self.assertEqual(os.stat(args[3]).st_mode & 0o777, 0o700)
 
     def test_avvio_testo_con_a_capo_non_trovato(self):
         v, av = self.prepara()
