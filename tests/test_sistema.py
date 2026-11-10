@@ -173,6 +173,17 @@ class PercorsoGuidatoTest(unittest.TestCase):
             impostazioni = json.loads((d / "casa" / ".claude" / "settings.json").read_text(encoding="utf-8"))
             self.assertIn("statusline-uso.py", impostazioni["statusLine"]["command"])
 
+    def test_regole_si_installano_solo_dopo_il_si(self):
+        with tempfile.TemporaryDirectory() as t:
+            d = self.vault(t)
+            (d / "scripts" / "installa-regole.py").write_text("", encoding="utf-8")
+            comandi, domande, _ = self.esegui(d, lambda testo: False)
+            self.assertEqual(comandi, [])
+            self.assertTrue(any("push" in q and "force" in q for q in domande))
+            comandi, _, _ = self.esegui(d, lambda testo: testo.startswith("Turn on the rules"))
+            self.assertEqual([Path(c[-2]).name for c in comandi], ["installa-regole.py"])
+            self.assertEqual(comandi[0][-1], "--si")
+
     def test_radar_senza_feed_non_lancia_niente(self):
         with tempfile.TemporaryDirectory() as t:
             d = self.vault(t)

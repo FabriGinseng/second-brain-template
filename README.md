@@ -10,7 +10,7 @@ A starter kit for a personal "second brain": an Obsidian vault of plain Markdown
 
 - **Projects**: one short `STATE.md` per project, rewritten (never appended), a dated `decisions.md`, and a row in `projects/INDEX.md`.
 - **Rules the agent follows**: a short `CLAUDE.md`, decisions in `docs/adr/` (confidential notes, autonomy level), a glossary.
-- **Permissions that back the rules**: `.claude/settings.json` blocks push, force-push, history rewrites and the confidential folder.
+- **Rules enforced by a hook**: `.claude/hooks/regole.py` with its list `regole.json` (ADR-012) asks before push, PRs, deploys and `rm` and refuses force-push and history rewrites, in every repo once `scripts/installa-regole.py` has run (setup offers it). `.claude/settings.json` guards the confidential folder.
 - **A check**: `scripts/verify` verifies the vault rules. No model, files only.
 - **Commands and subagents** in `.claude/`: see "Commands". The command texts are in Italian in v0.1.
 - **A local dashboard** (Python standard library, `127.0.0.1` only): projects, plan, today, radar, services and limits, posts, and an assistant panel. It shows only the pages of the modules you chose.

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Controlli sui permessi di Claude Code del vault: le regole che non devono mai saltare stanno nei settings, non nella prosa."""
+import importlib.util
 import json
 import unittest
 from pathlib import Path
@@ -20,18 +21,30 @@ def carica_locale():
 
 
 class SettingsTest(unittest.TestCase):
-    def test_deny_no_verify(self):
-        deny = carica(".claude/settings.json")["permissions"]["deny"]
-        self.assertIn("Bash(git commit *--no-verify*)", deny)
-        self.assertIn("Bash(git commit -n*)", deny)
+    def test_le_regole_bash_stanno_nell_hook(self):
+        # ADR-012: push, PR, rm e launchctl chiedono, force-push e --no-verify sono negati, decisi da regole.json
+        spec = importlib.util.spec_from_file_location("regole", RADICE / ".claude" / "hooks" / "regole.py")
+        regole = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(regole)
+        elenco = regole.carica_regole(RADICE / ".claude" / "hooks" / "regole.json")
+        attese = {"git push": "chiedi", "rm x": "chiedi", "launchctl load x": "chiedi", "gh pr create": "chiedi",
+                  "git push --force": "nega", "git push -f": "nega", "git commit --no-verify -m x": "nega", "git commit -n -m x": "nega"}
+        for comando, azione in attese.items():
+            self.assertEqual(regole.decidi({"tool_name": "Bash", "tool_input": {"command": comando}}, elenco, RADICE, Path.home())[0], azione, comando)
 
-    def test_push_e_azioni_esterne_chiedono_conferma_il_force_push_e_negato(self):
-        perm = carica(".claude/settings.json")["permissions"]
-        for regola in ("Bash(git push *)", "Bash(rm *)", "Bash(launchctl *)", "Bash(gh pr create *)"):
-            self.assertIn(regola, perm["ask"])
-            self.assertNotIn(regola, perm["allow"] + perm["deny"])
-        self.assertIn("Bash(git push *--force*)", perm["deny"])
-        self.assertIn("Bash(git push -f*)", perm["deny"])
+    def test_settings_del_vault_senza_regole_bash(self):
+        # le regole Bash per sottostringa si aggiravano (git -C . push) e bloccavano testo innocuo: in deny e ask restano solo quelle
+        # sui dati riservati (cartella del vault, _private del template o la cartella scelta dal wizard di setup.py, che la CI lancia prima dei test). Gira anche dentro il template costruito.
+        for file in (".claude/settings.json", "template/.claude/settings.json"):
+            if (RADICE / file).is_file():
+                perm = carica(file)["permissions"]
+                bash = {r for r in perm["deny"] + perm["ask"] if r.startswith("Bash(")}
+                self.assertLessEqual(bash, {"Bash(*GRAPH_REPORT*)", "Bash(*lavoro*)", "Bash(*_private*)", "Bash(*confidential-notes*)"}, file)
+
+    def test_nessun_allow_che_aggiri_l_hook(self):
+        # rtk riscrive git in `rtk git …`: un allow su rtk git o gh pr fa partire push e PR senza conferma (prova del 2026-11-09)
+        allow = carica(".claude/settings.json")["permissions"]["allow"] + carica_locale().get("permissions", {}).get("allow", [])
+        self.assertFalse([r for r in allow if r.startswith(("Bash(rtk", "Bash(gh pr", "Bash(git push"))], allow)
 
     def test_bypass_disabilitato(self):
         self.assertEqual(carica(".claude/settings.json")["permissions"].get("disableBypassPermissionsMode"), "disable")
@@ -51,13 +64,17 @@ class SettingsTest(unittest.TestCase):
         self.assertNotIn("WebSearch", allow)
 
     def test_hook_registrati_e_i_file_esistono(self):
-        hooks = carica(".claude/settings.json")["hooks"]
-        per_matcher = {v["matcher"]: [h["command"] for h in v["hooks"]] for v in hooks["PreToolUse"]}
-        self.assertTrue(any("protect_files.py" in c for c in per_matcher["Edit|Write"]))
-        self.assertTrue(any("no_bypass.py" in c for c in per_matcher["Bash"]))
-        self.assertTrue(any("stop_verify.py" in h["command"] for v in hooks["Stop"] for h in v["hooks"]))
-        for nome in ("protect_files.py", "no_bypass.py", "stop_verify.py"):
+        # PreToolUse lo fa l'hook utente ~/.claude/hooks/regole.py (scripts/installa-regole.py); nel progetto resta lo Stop
+        for file in (".claude/settings.json", "template/.claude/settings.json"):
+            if not (RADICE / file).is_file():
+                continue  # dentro il template costruito c'è solo .claude/settings.json
+            hooks = carica(file)["hooks"]
+            self.assertNotIn("PreToolUse", hooks, file)
+            self.assertTrue(any("stop_verify.py" in h["command"] for v in hooks["Stop"] for h in v["hooks"]), file)
+        for nome in ("regole.py", "regole.json", "stop_verify.py"):
             self.assertTrue((RADICE / ".claude" / "hooks" / nome).is_file(), nome)
+        for vecchio in ("protect_files.py", "no_bypass.py"):
+            self.assertFalse((RADICE / ".claude" / "hooks" / vecchio).exists(), vecchio)
 
     def test_agenti_senza_agent_tool(self):
         # i subagenti non ne lanciano altri: lo garantisce l'elenco `tools`, non la piattaforma
