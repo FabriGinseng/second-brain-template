@@ -57,7 +57,7 @@ class PianoStatoTest(unittest.TestCase):
         f = d / "piano.md"
         for stato, casella in (("in_corso", "~"), ("fatto", "x"), ("da_fare", " ")):
             server.imposta_stato("piano", "2026-10-26", "#a uno", stato, d)
-            self.assertEqual(f.read_text(), "## A\n- [%s] 2026-10-26 — #a uno\nfine\n" % casella)
+            self.assertEqual(f.read_text(encoding="utf-8"), "## A\n- [%s] 2026-10-26 — #a uno\nfine\n" % casella)
 
     def test_imposta_stato_conserva_crlf(self):
         d = scrivi("## A\r\n- [ ] uno\r\n- [ ] due\r\n")
@@ -86,14 +86,14 @@ def vault_finto(piano):
     repo.mkdir()
     for nome in ("alfa", "beta"):
         (v / "projects" / nome).mkdir(parents=True)
-    (v / "projects" / "alfa" / "STATE.md").write_text("# alfa\n- **Repo:** %s\n" % repo)
-    (v / "projects" / "beta" / "STATE.md").write_text("# beta\n- **Repo:** nessuno\n")
+    (v / "projects" / "alfa" / "STATE.md").write_text("# alfa\n- **Repo:** %s\n" % repo, encoding="utf-8")
+    (v / "projects" / "beta" / "STATE.md").write_text("# beta\n- **Repo:** nessuno\n", encoding="utf-8")
     (v / "projects" / "INDEX.md").write_text(
         "| Progetto | Stack | Stato | Priorità | Ultimo aggiornamento |\n|---|---|---|---|---|\n"
         "| [[projects/alfa/STATE\\|alfa]] | Stack | Stato | alta | 2026-11-09 |\n"
-        "| [[projects/beta/STATE\\|beta]] | Stack | Stato | da definire | 2026-11-09 |\n")
+        "| [[projects/beta/STATE\\|beta]] | Stack | Stato | da definire | 2026-11-09 |\n", encoding="utf-8")
     (v / "docs").mkdir()
-    (v / "docs" / "piano.md").write_text(piano)
+    (v / "docs" / "piano.md").write_text(piano, encoding="utf-8")
     return v
 
 
@@ -162,7 +162,7 @@ class MappaTest(unittest.TestCase):
 
     def test_lavoro_mai_risolto(self):
         v = vault_finto("")
-        (v / "projects" / "INDEX.md").write_text("| [[projects%slavoro%sx/STATE\\|x]] | S | S | alta | 2026-11-09 |\n" % ("/", "/"))  # il template non deve contenere il percorso scritto per intero
+        (v / "projects" / "INDEX.md").write_text("| [[projects%slavoro%sx/STATE\\|x]] | S | S | alta | 2026-11-09 |\n" % ("/", "/"), encoding="utf-8")  # il template non deve contenere il percorso scritto per intero
         vero = Path.read_text
 
         def guarda(self, *a, **k):
@@ -176,7 +176,7 @@ class MappaTest(unittest.TestCase):
             self.assertTrue(indice["x"]["lavoro"])
             m = server.mappa(ADESSO, piano_file=v / "docs" / "piano.md", vault=v)
             self.assertEqual(m["nodi"], [])  # senza voci non compare
-            (v / "docs" / "piano.md").write_text("## A\n- [ ] #x uno\n")
+            (v / "docs" / "piano.md").write_text("## A\n- [ ] #x uno\n", encoding="utf-8")
             n = server.mappa(ADESSO, piano_file=v / "docs" / "piano.md", vault=v)["nodi"][0]
             self.assertEqual((n["nome"], n["tipo"], n["haCartella"]), ("x", "progetto", False))
             self.assertIsNone(server.cartella_nodo(n, v))
@@ -186,7 +186,7 @@ class MappaTest(unittest.TestCase):
         y = v / "projects" / "lavoro" / "y"
         y.mkdir(parents=True)
         os.symlink(y, v / "link-y")
-        (v / "projects" / "alfa" / "STATE.md").write_text("- **Repo:** %s\n" % (v / "link-y"))
+        (v / "projects" / "alfa" / "STATE.md").write_text("- **Repo:** %s\n" % (v / "link-y"), encoding="utf-8")
         self.assertIsNone(server.cartella_nodo({"nome": "alfa", "tipo": "progetto"}, v))
         self.assertEqual(server.cartella_nodo({"nome": "linkedin", "tipo": "argomento"}, v), v)
 
@@ -221,10 +221,10 @@ class AvvioTest(unittest.TestCase):
             self.assertEqual(args[:3], ["/usr/bin/open", "-a", "Terminal"], ostile)
             self.assertEqual(len(args), 4)
             self.assertTrue(args[3].endswith(".command"))
-            cmd = Path(args[3]).read_text()
+            cmd = Path(args[3]).read_text(encoding="utf-8")
             self.assertNotIn(ostile, cmd)
             self.assertRegex(cmd, r"^#!/bin/zsh -l\ncd '?[^\n]+'? && exec claude \"\$\(cat '?[^\n]+\.txt'?\)\"\n$")
-            txt = Path(args[3]).with_suffix(".txt").read_text()
+            txt = Path(args[3]).with_suffix(".txt").read_text(encoding="utf-8")
             self.assertIn(ostile, txt)
             self.assertIn("(nodo #alfa)", txt)
             self.assertEqual(r["cartella"], str(v / "repo-alfa"))
@@ -239,14 +239,14 @@ class AvvioTest(unittest.TestCase):
         v, av = self.prepara()
         with self.assertRaises(RuntimeError):
             self.avvia(v, av, codice=1)
-        self.assertIn("- [ ] #alfa uno", (v / "docs" / "piano.md").read_text())
+        self.assertIn("- [ ] #alfa uno", (v / "docs" / "piano.md").read_text(encoding="utf-8"))
         server.ULTIMI_AVVII.clear()
         self.avvia(v, av)
-        self.assertIn("- [~] #alfa uno", (v / "docs" / "piano.md").read_text())
+        self.assertIn("- [~] #alfa uno", (v / "docs" / "piano.md").read_text(encoding="utf-8"))
 
     def test_avvio_rifiuta_cartella_lavoro(self):
         v, av = self.prepara("## A\n- [ ] #x uno\n")
-        (v / "projects" / "INDEX.md").write_text("| [[projects%s%sx/STATE\\|x]] | S | S | alta | 2026-11-09 |\n" % ("/", "lavoro" + "/"))
+        (v / "projects" / "INDEX.md").write_text("| [[projects%s%sx/STATE\\|x]] | S | S | alta | 2026-11-09 |\n" % ("/", "lavoro" + "/"), encoding="utf-8")
         with self.assertRaises(RuntimeError):
             self.avvia(v, av, "#x uno")
 
@@ -258,7 +258,7 @@ class AvvioTest(unittest.TestCase):
     def test_avvio_doppio_clic(self):
         v, av = self.prepara()
         _, c1 = self.avvia(v, av, adesso=lambda: 100.0)
-        (v / "docs" / "piano.md").write_text("## A\n- [ ] #alfa uno\n")  # la voce torna aperta: conta solo l'antirimbalzo
+        (v / "docs" / "piano.md").write_text("## A\n- [ ] #alfa uno\n", encoding="utf-8")  # la voce torna aperta: conta solo l'antirimbalzo
         with self.assertRaises(RuntimeError):
             self.avvia(v, av, adesso=lambda: 105.0)
         self.assertEqual(len(c1), 1)
@@ -301,7 +301,7 @@ class AvvioTest(unittest.TestCase):
         v, av = self.prepara()
         av.mkdir()
         vecchio = av / "vecchio.txt"
-        vecchio.write_text("x")
+        vecchio.write_text("x", encoding="utf-8")
         os.utime(vecchio, (1, 1))
         self.avvia(v, av)
         self.assertFalse(vecchio.exists())
@@ -315,12 +315,12 @@ class AggiungiVoceTest(unittest.TestCase):
     def test_dopo_l_ultima_voce_con_lo_stesso_tag(self):
         v, f = self.piano("## Prossimi giorni\n- [ ] #beta uno\n- [ ] #alfa due\n\n## Altro\n- [~] #beta tre\n\n- [ ] #alfa quattro\n")
         self.assertEqual(server.aggiungi_voce("beta", "cinque", vault=v), "- [ ] #beta cinque")
-        self.assertEqual(f.read_text(), "## Prossimi giorni\n- [ ] #beta uno\n- [ ] #alfa due\n\n## Altro\n- [~] #beta tre\n- [ ] #beta cinque\n\n- [ ] #alfa quattro\n")
+        self.assertEqual(f.read_text(encoding="utf-8"), "## Prossimi giorni\n- [ ] #beta uno\n- [ ] #alfa due\n\n## Altro\n- [~] #beta tre\n- [ ] #beta cinque\n\n- [ ] #alfa quattro\n")
 
     def test_le_voci_fatte_non_attirano_la_voce_nuova_in_fatti(self):
         v, f = self.piano("## Prossimi giorni \n- [ ] #alfa uno\n\n## Fatti\n- [x] #beta vecchio\n")
         server.aggiungi_voce("beta", "nuovo", vault=v)
-        self.assertEqual(f.read_text(), "## Prossimi giorni \n- [ ] #alfa uno\n- [ ] #beta nuovo\n\n## Fatti\n- [x] #beta vecchio\n")
+        self.assertEqual(f.read_text(encoding="utf-8"), "## Prossimi giorni \n- [ ] #alfa uno\n- [ ] #beta nuovo\n\n## Fatti\n- [x] #beta vecchio\n")
 
     def test_file_senza_sezioni_crea_prossimi_giorni(self):
         for iniziale in ("", "# Piano\n", "# Piano"):
@@ -336,12 +336,12 @@ class AggiungiVoceTest(unittest.TestCase):
     def test_tag_senza_voci_in_fondo_a_prossimi_giorni(self):
         v, f = self.piano("## Prossimi giorni\n- [ ] #alfa uno\n\n## Altro\n- [ ] #alfa due\n")
         server.aggiungi_voce("linkedin", "bozza", vault=v)
-        self.assertEqual(f.read_text(), "## Prossimi giorni\n- [ ] #alfa uno\n- [ ] #linkedin bozza\n\n## Altro\n- [ ] #alfa due\n")
+        self.assertEqual(f.read_text(encoding="utf-8"), "## Prossimi giorni\n- [ ] #alfa uno\n- [ ] #linkedin bozza\n\n## Altro\n- [ ] #alfa due\n")
 
     def test_senza_sezione_in_fondo_al_file_anche_senza_a_capo_finale(self):
         v, f = self.piano("## Altro\n- [ ] #alfa uno")
         server.aggiungi_voce("linkedin", "bozza", vault=v)
-        self.assertEqual(f.read_text(), "## Altro\n- [ ] #alfa uno\n- [ ] #linkedin bozza\n")
+        self.assertEqual(f.read_text(encoding="utf-8"), "## Altro\n- [ ] #alfa uno\n- [ ] #linkedin bozza\n")
 
     def test_crlf_conservato(self):
         v, f = self.piano("")
@@ -367,7 +367,7 @@ class AggiungiVoceTest(unittest.TestCase):
     def test_testo_di_200_caratteri_ok(self):
         v, f = self.piano("## A\n")
         server.aggiungi_voce("beta", "x" * 200, vault=v)
-        self.assertIn("#beta " + "x" * 200, f.read_text())
+        self.assertIn("#beta " + "x" * 200, f.read_text(encoding="utf-8"))
 
     def test_tag_di_un_progetto_del_lavoro_rifiutato(self):
         v, f = self.piano("## A\n")
@@ -375,13 +375,13 @@ class AggiungiVoceTest(unittest.TestCase):
             i.write("| [[projects" "/" "lavoro" "/cliente/STATE\\|cliente]] | Stack | Stato | alta | 2026-11-09 |\n")  # spezzato: il template non lo contiene per intero
         with self.assertRaises(ValueError):
             server.aggiungi_voce("Cliente", "ok", vault=v)
-        self.assertEqual(f.read_text(), "## A\n")
+        self.assertEqual(f.read_text(encoding="utf-8"), "## A\n")
 
     def test_doppione_409(self):
         v, f = self.piano("## A\n- [x] #beta uno\n")
         with self.assertRaises(RuntimeError):
             server.aggiungi_voce("beta", "uno", vault=v)
-        self.assertEqual(f.read_text(), "## A\n- [x] #beta uno\n")
+        self.assertEqual(f.read_text(encoding="utf-8"), "## A\n- [x] #beta uno\n")
 
 
 class RotteMappaTest(unittest.TestCase):
@@ -414,7 +414,7 @@ class RotteMappaTest(unittest.TestCase):
         return out
 
     def test_409_ha_un_codice(self):
-        self.v.joinpath("docs", "piano.md").write_text("## A\n- [x] doppia\n- [ ] doppia\n- [ ] #alfa uno\n")
+        self.v.joinpath("docs", "piano.md").write_text("## A\n- [x] doppia\n- [ ] doppia\n- [ ] #alfa uno\n", encoding="utf-8")
         self.assertEqual(self.post_json("/api/mappa/stato", {"data": None, "testo": "doppia", "stato": "fatto"}), (409, {"errore": "doppia"}))
         with mock.patch.object(server.sys, "platform", "darwin"), mock.patch.object(server.subprocess, "run", return_value=FinteEsito(0)) as run:
             self.assertEqual(self.post_json("/api/mappa/avvia", {"data": None, "testo": "doppia"}), (409, {"errore": "doppia"}))
@@ -423,7 +423,7 @@ class RotteMappaTest(unittest.TestCase):
             self.assertEqual(self.post_json("/api/mappa/avvia", {"data": None, "testo": "#alfa uno"}), (409, {"errore": "ripetuto"}))
         server.ULTIMI_AVVII.clear()
         with mock.patch.object(server.sys, "platform", "darwin"), mock.patch.object(server.subprocess, "run", return_value=FinteEsito(1)):
-            self.v.joinpath("docs", "piano.md").write_text("## A\n- [ ] #alfa uno\n")
+            self.v.joinpath("docs", "piano.md").write_text("## A\n- [ ] #alfa uno\n", encoding="utf-8")
             self.assertEqual(self.post_json("/api/mappa/avvia", {"data": None, "testo": "#alfa uno"}), (409, {"errore": "apertura"}))
 
     def post(self, percorso, corpo, azione=True):
@@ -445,17 +445,17 @@ class RotteMappaTest(unittest.TestCase):
         self.assertEqual(self.post("/api/mappa/stato", {"data": None, "testo": "#alfa uno"}), 400)
         self.assertEqual(self.post("/api/mappa/stato", {"data": None, "testo": "manca", "stato": "fatto"}), 404)
         self.assertEqual(self.post("/api/mappa/stato", {"data": None, "testo": "#alfa uno", "stato": "in_corso"}), 200)
-        self.assertIn("- [~] #alfa uno", (self.v / "docs" / "piano.md").read_text())
+        self.assertIn("- [~] #alfa uno", (self.v / "docs" / "piano.md").read_text(encoding="utf-8"))
 
     def test_nuovo_403_400_409_200(self):
         piano = self.v / "docs" / "piano.md"
         self.assertEqual(self.post("/api/mappa/nuovo", {"tag": "alfa", "testo": "due"}, azione=False), 403)
         for corpo in ({"tag": "alfa"}, {"testo": "due"}, {"tag": "alfa", "testo": "<i>"}, {"tag": "alfa", "testo": "a\nb"}, {"tag": 3, "testo": "due"}):
             self.assertEqual(self.post("/api/mappa/nuovo", corpo), 400)
-        self.assertEqual(piano.read_text(), "## A\n- [ ] #alfa uno\n")
+        self.assertEqual(piano.read_text(encoding="utf-8"), "## A\n- [ ] #alfa uno\n")
         self.assertEqual(self.post_json("/api/mappa/nuovo", {"tag": "alfa", "testo": "uno"}), (409, {"errore": "doppia"}))
         self.assertEqual(self.post_json("/api/mappa/nuovo", {"tag": "alfa", "testo": "due"}), (200, {"ok": True, "riga": "- [ ] #alfa due"}))
-        self.assertEqual(piano.read_text(), "## A\n- [ ] #alfa uno\n- [ ] #alfa due\n")
+        self.assertEqual(piano.read_text(encoding="utf-8"), "## A\n- [ ] #alfa uno\n- [ ] #alfa due\n")
 
     def test_avvia_su_linux_501(self):
         with mock.patch.object(server.sys, "platform", "linux"), mock.patch.object(server.subprocess, "run") as run:
