@@ -2,7 +2,10 @@
 
 ## Who I am
 
-<your name>, <your role>. Who I am, my skills and tone: [memory/about-me.md](memory/about-me.md). How I want you to work: [memory/preferences.md](memory/preferences.md). Read them when you need context about the person, not at every session.
+<your name>, <your role>. Who I am, my skills and tone: [memory/about-me.md](memory/about-me.md). How I want you to work: [memory/preferences.md](memory/preferences.md). They are loaded at every session (a file that does not exist yet is skipped):
+
+@memory/about-me.md
+@memory/preferences.md
 
 Language: reply in the language set in `config.json` (`language`). The system files (STATE, daily, commands) are written in Italian in v0.1.
 
