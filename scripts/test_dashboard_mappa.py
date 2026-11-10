@@ -64,6 +64,80 @@ class PianoStatoTest(unittest.TestCase):
         server.imposta_stato("piano", None, "uno", "in_corso", d)
         self.assertEqual((d / "piano.md").read_bytes(), b"## A\r\n- [~] uno\r\n- [ ] due\r\n")
 
+    def test_aggiungi_voce_in_fondo(self):
+        d = scrivi("## A\n- [ ] uno\n")
+        server.aggiungi_voce_libera("due", d)
+        self.assertEqual((d / "piano.md").read_text(), "## A\n- [ ] uno\n- [ ] due\n")
+
+    def test_aggiungi_voce_file_senza_a_capo_finale(self):
+        d = scrivi("## A\n- [ ] uno")
+        server.aggiungi_voce_libera("due", d)
+        self.assertEqual((d / "piano.md").read_text(), "## A\n- [ ] uno\n- [ ] due\n")
+
+    def test_aggiungi_voce_conserva_crlf(self):
+        for base in ("## A\r\n- [ ] uno\r\n", "## A\r\n- [ ] uno"):
+            d = scrivi(base)
+            server.aggiungi_voce_libera("due", d)
+            self.assertEqual((d / "piano.md").read_bytes(), b"## A\r\n- [ ] uno\r\n- [ ] due\r\n")
+
+    def test_aggiungi_voce_rifiuta_vuoto_lungo_e_a_capo(self):
+        d = scrivi("## A\n")
+        # splitlines() spezza anche su questi: il testo tornerebbe su due righe alla lettura dopo
+        for cattivo in ("", "x" * 201, "a\nb", "a\rb", "a - [ ] b", "a\x0bb", "a\x85b", 3):
+            with self.assertRaises(ValueError):
+                server.aggiungi_voce_libera(cattivo, d)
+        self.assertEqual((d / "piano.md").read_text(), "## A\n")
+
+    def test_aggiungi_voce_doppia(self):
+        d = scrivi("## A\n")
+        server.aggiungi_voce_libera("uno", d)
+        with self.assertRaises(RuntimeError):
+            server.aggiungi_voce_libera("uno", d)
+        self.assertEqual((d / "piano.md").read_text(), "## A\n- [ ] uno\n")
+
+    def test_aggiungi_voce_doppia_se_in_corso(self):
+        d = scrivi("## A\n- [~] uno\n")
+        with self.assertRaises(RuntimeError):
+            server.aggiungi_voce_libera("uno", d)
+
+    def test_aggiungi_voce_rifiuta_il_testo_di_una_voce_fatta(self):
+        d = scrivi("## A\n- [x] uno\n")
+        with self.assertRaises(RuntimeError):
+            server.aggiungi_voce_libera("uno", d)
+        self.assertEqual((d / "piano.md").read_text(), "## A\n- [x] uno\n")
+
+    def test_voce_aggiunta_si_puo_segnare_fatta(self):
+        d = scrivi("## A\n- [x] vecchia\n")
+        server.aggiungi_voce_libera("nuova", d)
+        server.imposta_stato("piano", None, "nuova", "fatto", d)
+        self.assertEqual((d / "piano.md").read_text(), "## A\n- [x] vecchia\n- [x] nuova\n")
+
+    def test_aggiungi_voce_prima_di_fatti(self):
+        d = scrivi("## Da fare\n- [ ] uno\n\n## Fatti\n- [x] a\n")
+        server.aggiungi_voce_libera("due", d)
+        self.assertEqual((d / "piano.md").read_text(), "## Da fare\n- [ ] uno\n- [ ] due\n\n## Fatti\n- [x] a\n")
+        s = server.leggi_sezioni(d / "piano.md")
+        self.assertEqual([v["testo"] for v in s[0]["voci"]], ["uno", "due"])
+
+    def test_aggiungi_voce_fatti_senza_distinzione_di_maiuscole_e_crlf(self):
+        d = scrivi("## Da fare\r\n- [ ] uno\r\n## FATTI\r\n- [x] a")
+        server.aggiungi_voce_libera("due", d)
+        self.assertEqual((d / "piano.md").read_bytes(), b"## Da fare\r\n- [ ] uno\r\n- [ ] due\r\n## FATTI\r\n- [x] a")
+
+    def test_aggiungi_voce_senza_intestazioni(self):
+        for base in ("", "testo libero\n", "testo libero"):
+            d = scrivi(base)
+            server.aggiungi_voce_libera("due", d)
+            s = server.leggi_sezioni(d / "piano.md")
+            self.assertEqual([(x["titolo"], [v["testo"] for v in x["voci"]]) for x in s], [("Da fare", ["due"])])
+
+    def test_aggiungi_voce_toglie_i_cancelletti(self):
+        d = scrivi("## A\n")
+        server.aggiungi_voce_libera("Novita #beta di #x", d)
+        self.assertEqual((d / "piano.md").read_text(), "## A\n- [ ] Novita beta di x\n")
+        with self.assertRaises(ValueError):
+            server.aggiungi_voce_libera(" # ", d)
+
     def test_stato_non_valido(self):
         d = scrivi("## A\n- [ ] uno\n")
         with self.assertRaises(ValueError):
@@ -103,10 +177,19 @@ def mappa_di(piano):
 
 
 class MappaTest(unittest.TestCase):
+    def test_il_nome_per_il_saluto_e_il_primo_di_nome_firma(self):
+        import json
+        v = vault_finto("")
+        self.assertEqual(server.mappa(ADESSO, piano_file=v / "docs" / "piano.md", vault=v)["nome"], "")  # senza config: nessun nome
+        (v / "config.json").write_text(json.dumps({"nome_firma": "Mario Rossi"}), encoding="utf-8")
+        self.assertEqual(server.mappa(ADESSO, piano_file=v / "docs" / "piano.md", vault=v)["nome"], "Mario")
+        (v / "config.json").write_text("non json", encoding="utf-8")
+        self.assertEqual(server.mappa(ADESSO, piano_file=v / "docs" / "piano.md", vault=v)["nome"], "")
+
     def test_nodi_per_tag_progetto_argomento_e_senza(self):
         m = mappa_di("## A\n- [ ] #alfa uno\n- [~] #ALFA due\n- [ ] #linkedin tre\n- [ ] quattro\n- [x] cinque\n")
         n = {x["nome"]: x for x in m["nodi"]}
-        self.assertEqual(set(n), {"alfa", "beta", "linkedin", "Senza nodo"})
+        self.assertEqual(set(n), {"alfa", "beta", "linkedin", "Senza nodo", "Social"})
         self.assertEqual((n["alfa"]["tipo"], len(n["alfa"]["task"]), n["alfa"]["haCartella"], n["alfa"]["priorita"]), ("progetto", 2, True, "alta"))
         self.assertEqual((n["beta"]["tipo"], n["beta"]["task"], n["beta"]["haCartella"]), ("progetto", [], True))  # senza Repo esistente si avvia nel vault
         self.assertEqual(n["linkedin"]["tipo"], "argomento")
@@ -175,9 +258,9 @@ class MappaTest(unittest.TestCase):
             self.assertEqual(indice["x"]["cartelle"], [])
             self.assertTrue(indice["x"]["lavoro"])
             m = server.mappa(ADESSO, piano_file=v / "docs" / "piano.md", vault=v)
-            self.assertEqual(m["nodi"], [])  # senza voci non compare
+            self.assertEqual([x["nome"] for x in m["nodi"]], ["Social"])  # senza voci non compare (c'è solo il nodo fisso)
             (v / "docs" / "piano.md").write_text("## A\n- [ ] #x uno\n", encoding="utf-8")
-            n = server.mappa(ADESSO, piano_file=v / "docs" / "piano.md", vault=v)["nodi"][0]
+            n = next(x for x in server.mappa(ADESSO, piano_file=v / "docs" / "piano.md", vault=v)["nodi"] if x["nome"] == "x")
             self.assertEqual((n["nome"], n["tipo"], n["haCartella"]), ("x", "progetto", False))
             self.assertIsNone(server.cartella_nodo(n, v))
 
@@ -189,6 +272,86 @@ class MappaTest(unittest.TestCase):
         (v / "projects" / "alfa" / "STATE.md").write_text("- **Repo:** %s\n" % (v / "link-y"), encoding="utf-8")
         self.assertIsNone(server.cartella_nodo({"nome": "alfa", "tipo": "progetto"}, v))
         self.assertEqual(server.cartella_nodo({"nome": "linkedin", "tipo": "argomento"}, v), v)
+
+
+def con_bozze(v, **per_rete):
+    """Scrive bozze finte in content/<rete>/ (nome -> titolo)."""
+    for rete, bozze in per_rete.items():
+        (v / "content" / rete).mkdir(parents=True, exist_ok=True)
+        for nome, titolo in bozze.items():
+            (v / "content" / rete / nome).write_text("# %s\n\nTesto.\n" % titolo, encoding="utf-8")
+
+
+class SocialTest(unittest.TestCase):
+    def nodo(self, v):
+        m = server.mappa(ADESSO, piano_file=v / "docs" / "piano.md", vault=v)
+        return m, next(x for x in m["nodi"] if x["nome"] == "Social")
+
+    def test_nodo_fisso_anche_senza_bozze(self):
+        m, n = self.nodo(vault_finto("## A\n- [ ] #alfa uno\n"))
+        self.assertEqual((n["tipo"], n["task"], n["haCartella"]), ("argomento", [], True))
+
+    def test_task_dalle_bozze_non_pubblicate(self):
+        v = vault_finto("")
+        con_bozze(v, linkedin={"2026-11-01-a.md": "Bozza LinkedIn: primo", "2026-11-02-b.md": "Bozza LinkedIn: secondo"},
+                  instagram={"2026-11-03-c.md": "Bozza Instagram: terzo"})
+        (v / "content" / "stato.json").write_text('{"linkedin/2026-11-01-a.md": {"stato": "pubblicata", "data": "2026-11-05"}}', encoding="utf-8")
+        _, n = self.nodo(v)
+        self.assertEqual(sorted(t["testo"] for t in n["task"]), ["instagram/2026-11-03-c.md", "linkedin/2026-11-02-b.md"])
+        t = next(t for t in n["task"] if t["testo"].startswith("linkedin"))
+        self.assertEqual((t["vista"], t["stato"], t["bozza"], t["data"]), ("LinkedIn: secondo", "da_fare", "linkedin", None))
+
+    def test_le_bozze_non_cambiano_prossima_e_conteggi(self):
+        v = vault_finto("## A\n- [ ] #alfa uno\n")
+        con_bozze(v, linkedin={"2026-11-01-a.md": "Bozza LinkedIn: primo"})
+        m, _ = self.nodo(v)
+        self.assertEqual(m["conteggi"], {"da_fare": 1, "in_corso": 0, "in_ritardo": 0})
+        self.assertEqual(m["prossima"]["nodo"], "alfa")
+
+    def test_tag_social_nel_piano_finisce_nello_stesso_nodo(self):
+        v = vault_finto("## A\n- [ ] #social scrivere\n")
+        con_bozze(v, linkedin={"2026-11-01-a.md": "Bozza LinkedIn: primo"})
+        m, n = self.nodo(v)
+        self.assertEqual(len(n["task"]), 2)
+        self.assertEqual(len([x for x in m["nodi"] if x["nome"].lower() == "social"]), 1)
+
+    def test_riga_progetto_porta_la_bozza_anche_sul_nodo_del_progetto(self):
+        v = vault_finto("## A\n- [ ] #alfa uno\n")
+        (v / "content" / "linkedin").mkdir(parents=True)
+        (v / "content" / "linkedin" / "2026-11-01-a.md").write_text("# Bozza LinkedIn: primo\nProgetto: ALFA\n\nTesto.\n", encoding="utf-8")
+        con_bozze(v, instagram={"2026-11-02-b.md": "Bozza Instagram: senza riga"})
+        m, social = self.nodo(v)
+        alfa = next(x for x in m["nodi"] if x["nome"] == "alfa")
+        self.assertEqual([t["testo"] for t in alfa["task"] if t.get("bozza")], ["linkedin/2026-11-01-a.md"])
+        self.assertEqual(len(social["task"]), 2)                      # resta anche in Social
+        self.assertEqual(m["conteggi"], {"da_fare": 1, "in_corso": 0, "in_ritardo": 0})
+        self.assertEqual(m["prossima"]["nodo"], "alfa")
+        self.assertEqual(m["prossima"]["testo"], "#alfa uno")          # la bozza non diventa prossima azione
+
+    def test_riga_progetto_sconosciuta_o_del_lavoro_resta_solo_in_social(self):
+        v = vault_finto("")
+        (v / "projects" / "INDEX.md").write_text(
+            (v / "projects" / "INDEX.md").read_text(encoding="utf-8") + "| [[projects%slavoro%sx/STATE\\|x]] | S | S | alta | 2026-11-09 |\n" % ("/", "/"), encoding="utf-8")
+        for nome, progetto in (("2026-11-01-a.md", "nonesiste"), ("2026-11-02-b.md", "x")):
+            (v / "content" / "linkedin").mkdir(parents=True, exist_ok=True)
+            (v / "content" / "linkedin" / nome).write_text("# Bozza LinkedIn: t\nProgetto: %s\n\nTesto.\n" % progetto, encoding="utf-8")
+        m, social = self.nodo(v)
+        self.assertEqual(len(social["task"]), 2)
+        self.assertFalse([t for x in m["nodi"] if x["nome"] != "Social" for t in x["task"] if t.get("bozza")])
+        self.assertNotIn("x", [x["nome"] for x in m["nodi"]])
+
+    def test_riga_progetto_non_finisce_nel_testo_da_copiare(self):
+        v = vault_finto("")
+        (v / "content" / "linkedin").mkdir(parents=True)
+        (v / "content" / "linkedin" / "2026-11-01-a.md").write_text("# Bozza LinkedIn: t\nProgetto: alfa\n\nTesto.\n", encoding="utf-8")
+        b = server.bozze(v / "content" / "linkedin")[0]
+        self.assertEqual((b["progetto"], b["testo"]), ("alfa", "Testo."))
+
+    def test_modulo_bozze_spento_nodo_vuoto(self):
+        v = vault_finto("")
+        con_bozze(v, linkedin={"2026-11-01-a.md": "Bozza LinkedIn: primo"})
+        (v / "config.json").write_text('{"moduli": {}}', encoding="utf-8")
+        self.assertEqual(self.nodo(v)[1]["task"], [])
 
 
 class FinteEsito:
@@ -413,6 +576,19 @@ class RotteMappaTest(unittest.TestCase):
         out = (r.status, json.loads(r.read() or b"{}"))
         c.close()
         return out
+
+    def test_piano_aggiungi_rotta(self):
+        self.assertEqual(self.post_json("/api/piano/aggiungi", {"testo": "nuova"}), (200, {"ok": True}))
+        self.assertTrue(self.v.joinpath("docs", "piano.md").read_text().endswith("- [ ] nuova\n"))
+        self.assertEqual(self.post_json("/api/piano/aggiungi", {"testo": "nuova"}), (409, {"errore": "doppia"}))
+        for corpo, atteso in (({"testo": ""}, 400), ({"x": 1}, 400), ({"testo": "z"}, 403)):
+            c = http.client.HTTPConnection("127.0.0.1", self.porta, timeout=10)
+            h = {"Content-Type": "application/json"}
+            if atteso != 403:
+                h["X-Azione"] = "conferma"
+            c.request("POST", "/api/piano/aggiungi", json.dumps(corpo), h)
+            self.assertEqual(c.getresponse().status, atteso)
+            c.close()
 
     def test_409_ha_un_codice(self):
         self.v.joinpath("docs", "piano.md").write_text("## A\n- [x] doppia\n- [ ] doppia\n- [ ] #alfa uno\n", encoding="utf-8")

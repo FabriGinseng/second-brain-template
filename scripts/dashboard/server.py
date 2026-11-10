@@ -557,20 +557,6 @@ def _trova_voce(righe, data, testo):
     return trovate[0]
 
 
-def imposta_stato(fonte, data, testo, stato, cartella=None):
-    """Mette la voce di docs/<fonte>.md con questa data e questo testo in stato da_fare, in_corso o fatto; cambia solo la casella.
-    ValueError: fonte o stato non previsti. LookupError: voce non trovata. RuntimeError: più voci uguali."""
-    if fonte not in FILE_SPUNTE or stato not in STATI:
-        raise ValueError(fonte if fonte not in FILE_SPUNTE else stato)
-    file = (cartella or VAULT / "docs") / FILE_SPUNTE[fonte]
-    with BLOCCO_PIANO:  # senza, due spunte insieme si cancellano a vicenda (o cancellano il file temporaneo dell'altra)
-        with open(file, encoding="utf-8", newline="") as f:  # newline="": CRLF resta com'è
-            righe = f.read().splitlines(keepends=True)
-        i = _trova_voce(righe, data, testo)
-        righe[i] = righe[i][:3] + STATI[stato] + righe[i][4:]
-        _scrivi_atomico(file, righe)
-
-
 def _scrivi_atomico(file, righe):
     """Scrittura atomica: un file temporaneo per chiamata e os.replace, così un errore a metà non lascia un piano troncato.
     Da chiamare con BLOCCO_PIANO già preso."""
@@ -583,6 +569,20 @@ def _scrivi_atomico(file, righe):
         os.replace(tmp, file)
     finally:
         tmp.unlink(missing_ok=True)
+
+
+def imposta_stato(fonte, data, testo, stato, cartella=None):
+    """Mette la voce di docs/<fonte>.md con questa data e questo testo in stato da_fare, in_corso o fatto; cambia solo la casella.
+    ValueError: fonte o stato non previsti. LookupError: voce non trovata. RuntimeError: più voci uguali."""
+    if fonte not in FILE_SPUNTE or stato not in STATI:
+        raise ValueError(fonte if fonte not in FILE_SPUNTE else stato)
+    file = (cartella or VAULT / "docs") / FILE_SPUNTE[fonte]
+    with BLOCCO_PIANO:  # senza, due spunte insieme si cancellano a vicenda (o cancellano il file temporaneo dell'altra)
+        with open(file, encoding="utf-8", newline="") as f:  # newline="": CRLF resta com'è
+            righe = f.read().splitlines(keepends=True)
+        i = _trova_voce(righe, data, testo)
+        righe[i] = righe[i][:3] + STATI[stato] + righe[i][4:]
+        _scrivi_atomico(file, righe)
 
 
 TAG_NUOVO = re.compile(r"[A-Za-z][\w-]*")
@@ -635,6 +635,43 @@ def aggiungi_voce(tag, testo, vault=None):
         righe.insert(pos, "- [ ] %s%s" % (grezzo, eol))
         _scrivi_atomico(file, righe)
     return "- [ ] " + grezzo
+
+
+def aggiungi_voce_libera(testo, cartella=None):
+    """Aggiunge '- [ ] testo' come ultima riga prima della sezione «Fatti» di docs/piano.md (in coda se manca), con lo stesso fine riga.
+    Senza nessuna intestazione «## » crea «## Da fare». I '#' del testo si tolgono: un titolo esterno non sceglie un nodo.
+    ValueError: testo non stringa, vuoto, oltre 200 caratteri o con a capo. RuntimeError("doppia"): voce uguale già presente (anche fatta)."""
+    # splitlines() spezza anche su \x0b, \x0c, \x85, \u2028: un testo con quei caratteri darebbe due righe alla lettura dopo
+    if not isinstance(testo, str) or len(testo) > 200 or len(testo.splitlines()) > 1:
+        raise ValueError("testo")
+    testo = " ".join(testo.replace("#", "").split()) if testo.strip() else ""
+    if not testo:
+        raise ValueError("testo")
+    file = (cartella or VAULT / "docs") / FILE_SPUNTE["piano"]
+    with BLOCCO_PIANO:
+        with open(file, encoding="utf-8", newline="") as f:
+            righe = f.read().splitlines(keepends=True)
+        for riga in righe:
+            v = VOCE_PIANO.match(riga.rstrip("\r\n"))
+            if v and not DATA_PIANO.match(v.group(2)) and v.group(2) == testo:
+                raise RuntimeError("doppia")
+        fine = "\r\n" if righe and righe[-1].endswith("\r\n") or (righe and "\r\n" in righe[0]) else "\n"
+        titoli = [(i, SEZIONE.match(r.rstrip("\r\n"))) for i, r in enumerate(righe)]
+        titoli = [(i, m.group(1).strip().lower()) for i, m in titoli if m]
+        if not titoli:
+            if righe and not righe[-1].endswith(("\n", "\r")):
+                righe[-1] += fine
+            righe.append("## Da fare" + fine)
+            pos = len(righe)
+        else:
+            fatti = next((i for i, t in titoli if t == "fatti"), len(righe))
+            pos = fatti
+            while pos > 0 and not righe[pos - 1].strip():  # dopo l'ultima riga piena, prima della riga vuota che stacca «Fatti»
+                pos -= 1
+        if pos == len(righe) and righe and not righe[-1].endswith(("\n", "\r")):
+            righe[-1] += fine
+        righe.insert(pos, "- [ ] " + testo + fine)
+        _scrivi_atomico(file, righe)
 
 
 def _momento(data):
@@ -738,6 +775,32 @@ def _prossima(aperte, adesso):
     return None
 
 
+def task_social(vault):
+    """Task del nodo Social: le bozze non ancora pubblicate né scartate di content/<rete>/, lette con bozze() (stesso elenco della pagina Post).
+    Sola lettura: testo = «rete/file», e la mappa non le avvia né le spunta (si decide in Post). Modulo bozze spento: nessun task.
+    `_progetto` è il nome dalla riga «Progetto:» della bozza; mappa() lo risolve e lo toglie."""
+    if not moduli_attivi(vault).get("bozze"):
+        return []
+    stati = stati_bozze(vault / "content" / "stato.json")
+    out = []
+    for rete in RETI:
+        for b in bozze(vault / "content" / rete, stati):
+            if b["stato"] == "da pubblicare":
+                titolo = re.sub(r"^Bozza \w+:\s*", "", b["titolo"])
+                out.append({"data": None, "testo": rete + "/" + b["nome"], "vista": rete.capitalize().replace("Linkedin", "LinkedIn") + ": " + titolo,
+                            "stato": "da_fare", "ritardo": False, "bozza": rete, "_progetto": b["progetto"]})
+    return out
+
+
+def nome_per_saluto(vault):
+    """Il primo nome di `nome_firma` in config.json, per «Buonasera, <nome>». Vuoto se manca o il file non si legge."""
+    try:
+        firma = json.loads((Path(vault) / "config.json").read_text(encoding="utf-8")).get("nome_firma")
+    except (OSError, ValueError, AttributeError):
+        return ""
+    return firma.split()[0] if isinstance(firma, str) and firma.split() else ""
+
+
 def mappa(adesso, piano_file=None, vault=None):
     """Nodi (progetti, argomenti, «Senza nodo») con i loro task di piano.md, prossima azione e conteggi."""
     vault = vault or VAULT
@@ -747,6 +810,12 @@ def mappa(adesso, piano_file=None, vault=None):
                 "haCartella": _cartella_di("progetto", i, vault) is not None,
                 "cartella": _str_o_none(_cartella_di("progetto", i, vault)), "task": []}
     nodi = {n: nuovo(i) for n, i in indice.items() if not i.get("lavoro")}  # i progetti del lavoro senza voci non compaiono
+    if "social" not in nodi:  # nodo fisso: LinkedIn e Instagram. Le sue bozze non entrano in prossima azione né nei conteggi (non sono righe di piano.md)
+        nodi["social"] = {"nome": "Social", "tipo": "argomento", "priorita": None, "haCartella": True, "cartella": str(vault), "task": task_social(vault)}
+        for t in nodi["social"]["task"]:  # la bozza con «Progetto: <nome>» di un progetto di INDEX compare anche sul suo nodo (mai quelli del lavoro: non sono in `nodi`)
+            p = nodi.get(str(t.pop("_progetto") or "").lower())
+            if p and p["tipo"] == "progetto":
+                p["task"].append(t)
     aperte = []  # (nome nodo, task, ritardo, momento, progetto alta), in ordine di file
     for sez in leggi_sezioni(piano_file or vault / "docs" / "piano.md"):
         for v in sez["voci"]:
@@ -775,7 +844,7 @@ def mappa(adesso, piano_file=None, vault=None):
     conta = lambda f: sum(1 for r in aperte if f(r))
     aperti = lambda n: sum(1 for t in n["task"] if t["stato"] != "fatto")
     ordinati = sorted(nodi.values(), key=lambda n: (not (scelta and n is scelta[0]), -aperti(n), n["nome"].lower()))
-    return {"nodi": ordinati, "prossima": prossima,
+    return {"nodi": ordinati, "prossima": prossima, "nome": nome_per_saluto(vault),
             "conteggi": {"da_fare": conta(lambda r: r[1]["stato"] == "da_fare"),
                          "in_corso": conta(lambda r: r[1]["stato"] == "in_corso"),
                          "in_ritardo": conta(lambda r: r[2])}}
@@ -1271,11 +1340,13 @@ def bozze(cartella=BOZZE, stati=None):
     for file in sorted(cartella.glob("*.md"), reverse=True):
         righe = file.read_text(encoding="utf-8").splitlines()
         titolo = righe[0].removeprefix("# ").strip() if righe else file.stem
-        testo = "\n".join(r for r in righe[1:] if not r.lstrip("[").startswith("Immagine")).strip()
+        riga_prog = next((r for r in righe[1:3] if r.startswith("Progetto:")), None)  # «Progetto: <nome>» subito sotto il titolo
+        progetto = riga_prog.removeprefix("Progetto:").strip() if riga_prog else None
+        testo = "\n".join(r for r in righe[1:] if r is not riga_prog and not r.lstrip("[").startswith("Immagine")).strip()
         immagine = next((i for i in (file.with_suffix(".png"), file.with_name(file.stem + "-schema.png")) if i.is_file()), None)
         st = (stati or {}).get(cartella.name + "/" + file.name) or {}
         out.append({"nome": file.name, "titolo": titolo, "testo": testo, "immagine": immagine.name if immagine else None,
-                    "stato": st.get("stato", "da pubblicare"), "data": st.get("data")})
+                    "stato": st.get("stato", "da pubblicare"), "data": st.get("data"), "progetto": progetto or None})
     return out
 
 
@@ -1313,6 +1384,7 @@ ROTTE_JSON = {
 # Le sole risorse statiche servite: il nome non viene mai dal percorso della richiesta
 STATICI = {"/dashboard.js": ("dashboard.js", "text/javascript; charset=utf-8"),
            "/mappa.js": ("mappa.js", "text/javascript; charset=utf-8"),
+           "/componenti.js": ("componenti.js", "text/javascript; charset=utf-8"),
            "/dashboard.css": ("dashboard.css", "text/css; charset=utf-8")}
 
 
@@ -1329,6 +1401,9 @@ class Gestore(BaseHTTPRequestHandler):
             return
         if percorso in ("/api/mappa/stato", "/api/mappa/avvia", "/api/mappa/nuovo"):
             self._mappa_scrive(percorso.rsplit("/", 1)[1])
+            return
+        if percorso == "/api/piano/aggiungi":
+            self._piano_aggiungi()
             return
         if percorso == "/api/radar/feedback":
             self._vota()
@@ -1392,6 +1467,21 @@ class Gestore(BaseHTTPRequestHandler):
             self.send_error(500)
             return
         self._json({"fatto": fatto})
+
+    def _piano_aggiungi(self):
+        try:
+            testo = self._corpo_json()["testo"]
+            aggiungi_voce_libera(testo)
+        except (KeyError, TypeError, AttributeError, ValueError):
+            self.send_error(400)
+            return
+        except RuntimeError as e:
+            self._json({"errore": str(e)}, 409)
+            return
+        except OSError:
+            self.send_error(500)
+            return
+        self._json({"ok": True})
 
     def _mappa_scrive(self, azione):
         """azione: «stato», «avvia» o «nuovo»."""

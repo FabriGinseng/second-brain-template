@@ -3,6 +3,7 @@
 Il redesign aveva tolto aggiornaVista ma setTimeout(aggiornaVista, 700) era rimasto: dopo ogni spunta riuscita la pagina
 andava in ReferenceError, rimetteva la casella com'era e scriveva "spunta non salvata" anche se il file era salvato.
 """
+import json
 import re
 import unittest
 from pathlib import Path
@@ -34,6 +35,7 @@ class HtmlDashboard(unittest.TestCase):
         self.assertIn("mappa-satelliti", js)
         self.assertNotIn("x1: p.x, y1: p.y", js)  # i fili della zona di aggancio partono dal bordo del disco, non dal centro: il disco resta cliccabile
         self.assertIn("prefers-reduced-motion", (D / "dashboard.css").read_text(encoding="utf-8"))
+        self.assertIn("dati.nome", js)  # il saluto dice «Buonasera, <nome>.»
         self.assertIn("PAROLE_FUNZIONE", js)  # il saluto non finisce su una preposizione
         self.assertIn("#mappa-pannello { display: contents; }", (D / "dashboard.css").read_text(encoding="utf-8"))  # su telefono la prossima azione sta sotto il saluto
 
@@ -68,6 +70,15 @@ class HtmlDashboard(unittest.TestCase):
         self.assertIn("textContent", js)                                # il testo dell'utente entra solo come testo
         self.assertNotIn("innerHTML", js)
 
+    def test_i_numeri_dei_nodi_si_spiegano_e_le_bozze_sono_in_sola_lettura(self):
+        js = (D / "mappa.js").read_text(encoding="utf-8")
+        css = (D / "dashboard.css").read_text(encoding="utf-8")
+        for pezzo in ("task aperti", "nessun task nel piano con questo tag", "Il numero sul nodo = task aperti nel piano",
+                      "bozze da pubblicare", "nessuna bozza da pubblicare", "Apri in Post", "t.bozza",
+                      "n.nome === 'Social' || !t.bozza"):   # sui nodi dei progetti le bozze sono satelliti, non entrano nel numero
+            self.assertIn(pezzo, js)
+        self.assertIn("nota-mappa", css)                                # la legenda del numero resta visibile anche sotto i 760px
+
     def test_la_mappa_conosce_i_codici_409_e_la_tastiera_dei_satelliti(self):
         js = (D / "mappa.js").read_text(encoding="utf-8")
         for codice in ("doppia", "cartella", "ripetuto", "apertura"):
@@ -78,6 +89,17 @@ class HtmlDashboard(unittest.TestCase):
         self.assertIn("Riavvia", js)
         self.assertIn(".mappa-lista:focus-within", (D / "dashboard.css").read_text(encoding="utf-8"))
         self.assertEqual((D / "dashboard.js").read_text(encoding="utf-8").count("fetch('/api/oggi'"), 1)  # la mappa riusa la lettura di aggiorna()
+
+    def test_componenti_js_servito_e_senza_innerhtml(self):
+        self.assertIn('"/componenti.js": ("componenti.js"', (D / "server.py").read_text(encoding="utf-8"))
+        js = (D / "componenti.js").read_text(encoding="utf-8")
+        self.assertNotIn("innerHTML", js)
+        for nome in ("stato", "mostraTutto", "cornice", "errore", "schede", "senzaTag", "dato"):
+            self.assertIn(nome + "(", js)
+
+    def test_index_carica_componenti_prima_di_dashboard(self):
+        html = (D / "index.html").read_text(encoding="utf-8")
+        self.assertLess(html.index('src="/componenti.js"'), html.index('src="/dashboard.js"'))
 
     def test_i_timer_chiamano_solo_funzioni_definite(self):
         self.assertEqual(funzioni_mancanti(HTML.read_text(encoding="utf-8")), [])
@@ -103,6 +125,31 @@ class HtmlDashboard(unittest.TestCase):
         self.assertIn("Servizi e vault", html)                # ogni sezione dice cosa contiene
         self.assertNotIn("<h2>Job e vault</h2>", html)
 
+    def test_avvii_niente_sezione_log_separata(self):
+        indice = (D / "index.html").read_text(encoding="utf-8")
+        avvii = indice[indice.index('id="avvii-vista"'):indice.index('id="configurazione-vista"')]
+        self.assertNotIn('id="esecuzioni"', avvii)
+        self.assertNotIn("Avvii a mano e log", indice)
+        self.assertIn('id="avvii-dato"', avvii)
+        self.assertEqual(avvii.count('class="primario"'), 0)
+        js = (D / "dashboard.js").read_text(encoding="utf-8")
+        r = js[js.index("function rigaAvvio"):js.index("async function aggiornaAvvii")]
+        self.assertIn("Comp.dato('avvii'", r)
+        self.assertIn("aria-expanded", r)
+        self.assertIn("Avvia ora", r)
+        self.assertIn("Nessun log", r)
+        self.assertNotIn("innerHTML", r)
+
+    def test_avvii_saltato_non_e_un_allarme(self):
+        js = (D / "dashboard.js").read_text(encoding="utf-8")
+        m = re.search(r"TONO_AVVIO = \{([^}]*)\}", js)
+        self.assertIsNotNone(m)
+        toni = dict(re.findall(r"'?([\w-]+)'?: '(\w+)'", m.group(1)))
+        self.assertEqual(toni["saltato"], "neutro")
+        self.assertEqual(toni["fallito"], "errore")
+        self.assertEqual(toni["mancato"], "attenzione")
+        self.assertEqual(toni["ok"], "ok")
+
     def test_oggi_risponde_a_cosa_aspetta_me(self):
         # «Aspetta te» e il prossimo passo stanno nella mappa; Agenda tiene il resto di Oggi.
         html = HTML.read_text(encoding="utf-8")
@@ -115,11 +162,207 @@ class HtmlDashboard(unittest.TestCase):
         self.assertIn("'/api/attesa'", html)
         for tolto in ("kpi-job", "kpi-scartate", "kpi-vault"):  # numeri che non portano a nessuna azione
             self.assertNotIn(tolto, html, tolto)
-        self.assertLessEqual(agenda.count('<li><b id="kpi-'), 3)
-        # Chiedi sta in fondo e su telefono si apre solo se serve
-        self.assertGreater(agenda.index('id="assistente"'), agenda.index('id="aspetta-novita"'))
-        self.assertIn('<details class="chiedi"', agenda)
         self.assertIn("matchMedia", html)
+
+    def _agenda(self):
+        html = (D / "index.html").read_text(encoding="utf-8")
+        return html[html.index('id="agenda-vista"'):html.index('id="radar-vista"')]
+
+    def test_agenda_ha_un_solo_primario(self):
+        self.assertEqual(self._agenda().count('class="primario"'), 1)
+        self.assertEqual(self._agenda().count("<form"), 1)  # una sola barra: la domanda e «Aggiungi: ...» stanno nella stessa casella
+
+    def test_agenda_senza_contatori_ne_novita(self):
+        agenda = self._agenda()
+        for tolto in ("kpi-", "aspetta-novita", 'data-vai="avvii"', "<details class=\"chiedi\""):
+            self.assertNotIn(tolto, agenda, tolto)
+        self.assertNotIn("kpi-radar", (D / "dashboard.js").read_text(encoding="utf-8"))
+
+    def test_agenda_toglie_i_tag_dal_testo(self):
+        js = (D / "dashboard.js").read_text(encoding="utf-8")
+        self.assertIn("Comp.senzaTag(", js)
+        self.assertIn("Comp.mostraTutto(", js)
+        self.assertIn("avviaVoce", (D / "mappa.js").read_text(encoding="utf-8"))
+        self.assertIn("-webkit-line-clamp: 2", (D / "dashboard.css").read_text(encoding="utf-8"))
+
+    def test_agenda_avvia_solo_con_cartella_e_nodo_dalla_mappa(self):
+        js = (D / "dashboard.js").read_text(encoding="utf-8")
+        riga = js[js.index("function rigaAgenda"):js.index("const elencoAgenda")]
+        self.assertIn("nodoDi(tag)", riga)
+        self.assertIn("haCartella", riga)
+        mappa = (D / "mappa.js").read_text(encoding="utf-8")
+        voce = mappa[mappa.index("async function avviaVoce"):mappa.index("window.Mappa =")]
+        self.assertNotIn("cartella: null", voce)
+        self.assertIn("conferma(n,", voce)
+
+    def test_mostra_tutto_non_mette_details_dentro_la_ul(self):
+        js = (D / "componenti.js").read_text(encoding="utf-8")
+        corpo = js[js.index("function mostraTutto"):js.index("function cornice")]
+        self.assertIn("nodo('li', 'resto-li'", corpo)
+        self.assertNotIn("f.appendChild(resto)", corpo)
+        self.assertIn(".elenco-agenda li { font-size: inherit", (D / "dashboard.css").read_text(encoding="utf-8"))
+
+    def test_schede_con_nome_e_tasti_home_end(self):
+        comp = (D / "componenti.js").read_text(encoding="utf-8")
+        for parte in ("etichetta)", "aria-label", "Home:", "End:"):
+            self.assertIn(parte, comp[comp.index("function schede"):comp.index("function senzaTag")])
+        js = (D / "dashboard.js").read_text(encoding="utf-8")
+        self.assertIn("'Sezioni dei consumi'", js)
+        self.assertIn("'Sezioni della configurazione'", js)
+
+    def test_senza_tag_come_il_server(self):
+        import shutil, subprocess
+        if not shutil.which("node"):
+            self.skipTest("node non c'è")
+        prova = ("global.window={};global.document={};eval(require('fs').readFileSync(process.argv[1],'utf8'));"
+                 "console.log(JSON.stringify(['#x Testo','Fix bug #12 della dashboard','PR#3','C#-tool','url#frag','Foo #Beta bar'].map(window.Comp.senzaTag)))")
+        out = subprocess.run(["node", "-e", prova, str(D / "componenti.js")], capture_output=True, text=True, timeout=30, check=True).stdout
+        self.assertEqual(json.loads(out), [
+            {"testo": "Testo", "tag": "x"}, {"testo": "Fix bug #12 della dashboard", "tag": None},
+            {"testo": "PR#3", "tag": None}, {"testo": "C#-tool", "tag": None},
+            {"testo": "url#frag", "tag": None}, {"testo": "Foo bar", "tag": "beta"}])
+
+    def _comp(self, espressione):
+        import shutil, subprocess
+        if not shutil.which("node"):
+            self.skipTest("node non c'è")
+        prova = ("global.window={};global.document={};eval(require('fs').readFileSync(process.argv[1],'utf8'));"
+                 "console.log(JSON.stringify(" + espressione + "))")
+        return json.loads(subprocess.run(["node", "-e", prova, str(D / "componenti.js")], capture_output=True, text=True, timeout=30, check=True).stdout)
+
+    def test_prima_frase_senza_backtick_e_senza_taglio_a_meta(self):
+        lungo = "Uso fermo ai dati vecchi: `~/.claude/usage-live.json` lo aggiorna solo la barra. Le sessioni desktop no. " + "Altro testo. " * 20
+        r = self._comp("window.Comp.prima(%s, 110)" % json.dumps(lungo))
+        self.assertEqual(r["testo"], "Uso fermo ai dati vecchi: ~/.claude/usage-live.json lo aggiorna solo la barra. Le sessioni desktop no.")
+        self.assertNotIn("`", r["testo"] + r["resto"])
+        self.assertTrue(r["resto"].startswith("Altro testo."))
+        self.assertEqual(self._comp("window.Comp.prima('Breve.', 140)"), {"testo": "Breve.", "resto": ""})
+        # una sola frase lunga resta intera: mai un «…» a meta frase
+        r = self._comp("window.Comp.prima(%s, 20)" % json.dumps("Una frase molto lunga senza punti intermedi"))
+        self.assertEqual(r, {"testo": "Una frase molto lunga senza punti intermedi", "resto": ""})
+
+    def test_limita_settimane_tiene_le_prime_n(self):
+        voci = [{"s": s} for s in ("a", "a", "b", "c", "c", "d")]
+        r = self._comp("window.Comp.limitaSettimane(%s, v => v.s, 2)" % json.dumps(voci))
+        self.assertEqual([v["s"] for v in r["viste"]], ["a", "a", "b"])
+        self.assertEqual([v["s"] for v in r["altre"]], ["c", "c", "d"])
+        self.assertEqual(self._comp("window.Comp.limitaSettimane([], v => v, 3)"), {"viste": [], "altre": []})
+
+    def _radar(self):
+        html = (D / "index.html").read_text(encoding="utf-8")
+        return html[html.index('id="radar-vista"'):html.index('id="consumi-vista"')]
+
+    def test_radar_ha_un_solo_primario(self):
+        self.assertEqual(self._radar().count('class="primario"'), 1)
+        self.assertIn('id="radar-dato"', self._radar())
+        self.assertIn("Aggiorna il radar", self._radar())
+
+    def test_radar_aggiungi_al_piano_chiede_conferma(self):
+        js = (D / "dashboard.js").read_text(encoding="utf-8")
+        self.assertIn("Aggiungi al piano", js)
+        self.assertIn("showModal()", js)
+        self.assertEqual(js.count("/api/piano/aggiungi"), 1)  # una sola chiamata, dentro l'invio del dialogo
+        conferma = js[js.index("function confermaPiano"):js.index("function rigaNovita")]
+        self.assertLess(conferma.index("addEventListener('submit'"), conferma.index("/api/piano/aggiungi"))
+        self.assertIn("showModal()", conferma)
+        fetch = js[js.index("/api/piano/aggiungi"):][:300]
+        self.assertIn("'X-Azione': 'conferma'", fetch)
+        self.assertIn('maxLength = 200', js)
+
+    def test_radar_senza_barre_dell_imbuto(self):
+        js = (D / "dashboard.js").read_text(encoding="utf-8")
+        self.assertNotIn("imbutoRadar", js)
+        self.assertNotIn("riga-imbuto", js[js.index("function renderRadar"):js.index("function renderSistema")])
+
+    def test_post_tre_contatori(self):
+        js = (D / "dashboard.js").read_text(encoding="utf-8")
+        r = js[js.index("function renderPost"):js.index("// Le due schede di Post")]
+        for e in ("nei prossimi 7 giorni", "da approvare", "da creare"):
+            self.assertIn(e, r)
+        for e in ("voci in calendario", "'pubblicati'"):
+            self.assertNotIn(e, r)
+        self.assertIn("Mostra le passate", r)
+        self.assertIn("Comp.dato('post'", r)
+        indice = (D / "index.html").read_text(encoding="utf-8")
+        self.assertNotIn("post-sub", indice + js)
+        self.assertIn('id="post-dato"', indice)
+
+    def test_post_ha_ancora_chiedi_un_post_e_le_bozze(self):
+        indice = (D / "index.html").read_text(encoding="utf-8")
+        post = indice[indice.index('id="post-vista"'):indice.index('id="avvii-vista"')]
+        for i in ("chiedi-post", "post-bozze", "form-richiesta"):
+            self.assertIn(i, indice)
+        self.assertEqual(post.count('class="primario"'), 1)
+
+    def _consumi(self):
+        html = (D / "index.html").read_text(encoding="utf-8")
+        return html[html.index('id="consumi-vista"'):html.index('id="post-vista"')]
+
+    def test_consumi_tre_schede_e_hash_vecchi(self):
+        c = self._consumi()
+        self.assertIn('id="consumi-dato"', c)
+        self.assertIn('id="consumi-schede"', c)
+        self.assertEqual(c.count('class="primario"'), 0)
+        js = (D / "dashboard.js").read_text(encoding="utf-8")
+        self.assertIn("Comp.schede($('consumi-schede')", js)
+        for voce in ("'claude'", "'servizi'", "'locale'"):
+            self.assertIn(voce, js[js.index("const SCHEDE_CONSUMI"):][:300])
+        alias = js[js.index("const ALIAS"):][:300]
+        for h in ("servizi: 'consumi'", "claude: 'consumi'", "prestazioni: 'consumi'"):
+            self.assertIn(h, alias)
+        sezione = js[js.index("const SEZIONE"):][:200]
+        for h in ("servizi: 'servizi'", "claude: 'claude'", "prestazioni: 'locale'"):
+            self.assertIn(h, sezione)
+
+    def test_consumi_contenuto_claude_invariato(self):
+        c = self._consumi()
+        self.assertIn('id="p-claude"', c)
+        self.assertIn('id="p-consumo"', c)
+        self.assertLess(c.index('id="consumi-claude"'), c.index('id="p-claude"'))
+
+    def test_consumi_dettagli_in_details_e_schema_leggibile(self):
+        c = self._consumi()
+        for titolo in ("Come gira", "Quando conviene passare a pagamento", "Piani e prezzi"):
+            self.assertRegex(c, r'<details[^>]*>\s*<summary>' + titolo)
+        js = (D / "dashboard.js").read_text(encoding="utf-8")
+        schema = js[js.index("function schemaServizi"):js.index("async function aggiornaMisura")]
+        self.assertIn("etichetta-fondo", schema)  # le etichette degli archi stanno su un fondo opaco, non si leggono sovrapposte
+
+    def _conf_js(self):
+        js = (D / "dashboard.js").read_text(encoding="utf-8")
+        return js[js.index("function pulsanteControlla"):js.index("async function aggiornaConfigurazione")]
+
+    def test_configurazione_senza_gergo_dello_scanner_in_vista(self):
+        indice = (D / "index.html").read_text(encoding="utf-8")
+        conf = indice[indice.index('id="configurazione-vista"'):indice.index('<dialog id="form-richiesta"')]
+        self.assertNotIn("punteggio", conf)
+        self.assertIn('id="conf-dato"', conf)
+        self.assertIn('id="conf-schede"', conf)
+        self.assertRegex(conf, r'<details[^>]*>\s*<summary>Cosa non si vede qui')
+        js = self._conf_js()
+        i = js.index("function dettaglioScanner")
+        fine = js.index("\n}\n", i)
+        self.assertNotIn("punteggio", js[:i] + js[fine:])  # il gergo sta solo nel dettaglio per riga
+        self.assertIn("el('details'", js[i:fine])
+        self.assertIn("Comp.dato('conf'", js)
+        self.assertIn("Comp.schede($('conf-schede')", js)
+        self.assertIn("Comp.stato(", js)
+        self.assertIn("si può aggiornare", js)
+        self.assertIn("chiede la tua conferma", js)
+        self.assertNotIn("innerHTML", js)
+
+    def test_configurazione_un_solo_primario(self):
+        js = self._conf_js()
+        self.assertEqual(len(re.findall(r"'primario'", js)), 2)  # «Aggiorna tutte» oppure l'unica riga, mai insieme
+        self.assertIn("aggiornabili.length > 1", js)
+
+    def test_configurazione_mantiene_le_azioni(self):
+        js = self._conf_js()
+        self.assertEqual(js.count("'/api/configurazione/aggiorna'"), 2)  # singola e «Aggiorna tutte»
+        self.assertIn("'/api/azioni/controllo-skill'", js)
+        self.assertIn("'/api/configurazione/interruttore'", js)
+        self.assertIn("function pulsanteAggiornaTutte", js)
+        self.assertIn("Controlla ora", js)
 
     def test_menu_a_quattro_gruppi(self):
         indice = (D / "index.html").read_text(encoding="utf-8")
@@ -154,12 +397,13 @@ class HtmlDashboard(unittest.TestCase):
         css = (D / "dashboard.css").read_text(encoding="utf-8")
         fuori = re.sub(r":root[^{]*\{[^}]*\}", "", css)
         self.assertEqual(re.findall(r"#[0-9a-fA-F]{3,6}\b|rgba?\(", fuori), [])
-        self.assertNotRegex(re.sub(r"dialog[^{]*\{[^}]*\}", "", css), r"gradient|box-shadow")
+        # il gradiente è ammesso solo come maschera (la sfumatura che dice «la barra scorre»), mai come sfondo
+        senza_maschere = re.sub(r"mask-image:[^;]*;", "", re.sub(r"dialog[^{]*\{[^}]*\}", "", css))
+        self.assertNotRegex(senza_maschere, r"gradient|box-shadow")
 
-    def test_attesa_controlla_la_risposta_e_mostra_il_dato_mancante(self):
+    def test_attesa_controlla_la_risposta(self):
         html = HTML.read_text(encoding="utf-8")
         self.assertIn("if (!ra.ok)", html)           # una pagina d'errore non va letta come JSON
-        self.assertIn("a.conteggi.skill ?? '–'", html)  # dato assente: un trattino, non zero
 
     def test_nessuna_richiesta_a_font_esterni_e_solo_font_di_sistema(self):
         # a ogni apertura partiva una richiesta a Google, e senza rete la pagina cambiava carattere
@@ -172,6 +416,28 @@ class HtmlDashboard(unittest.TestCase):
     def test_il_controllo_riconosce_il_difetto_di_prima(self):
         self.assertEqual(funzioni_mancanti("setTimeout(aggiornaVista, 700);"), ["aggiornaVista"])
         self.assertEqual(funzioni_mancanti("function a(){}\nsetInterval(a, 5);\nsetTimeout(() => a(), 1);"), [])
+
+
+class GraficiConsumi(unittest.TestCase):
+    """I grafici di Consumi avevano viewBox fisso a 900: scalato a 1090px il testo di 12 unità diventava 14,5px, a 390px 4,5px."""
+    def test_viewbox_dalla_larghezza_reale(self):
+        js = (D / "dashboard.js").read_text(encoding="utf-8")
+        self.assertNotRegex(js, r"W = 900, H = 240")
+        self.assertGreaterEqual(js.count("larghezzaGrafico("), 2)  # una per grafico
+
+    def test_larghezza_minima_con_scroll_e_giorni_senza_sovrapposizioni(self):
+        css = (D / "dashboard.css").read_text(encoding="utf-8")
+        self.assertIn("#p-consumo svg { min-width: 560px; }", css)
+        self.assertIn("#p-consumo .scorri { overflow-x: auto; }", css)
+        self.assertIn(".giorni span:not(:first-child):not(:last-child) { visibility: hidden; }", css)
+        self.assertIn("Math.max(560,", (D / "dashboard.js").read_text(encoding="utf-8"))
+
+    def test_testo_degli_assi_non_oltre_12px(self):
+        css = (D / "dashboard.css").read_text(encoding="utf-8")
+        m = re.search(r"#p-consumo \.asse-testo[^{]*\{[^}]*font: 400 ([\d.]+)px", css)
+        self.assertTrue(m)
+        self.assertLessEqual(float(m.group(1)), 12)
+        self.assertGreaterEqual(float(m.group(1)), 11)
 
 
 if __name__ == "__main__":

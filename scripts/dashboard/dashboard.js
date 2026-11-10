@@ -1,5 +1,4 @@
 const $ = id => document.getElementById(id);
-$('data-oggi').textContent = new Date().toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' });
 
 function el(tag, classe, figli) {
   const nodo = document.createElement(tag);
@@ -23,11 +22,8 @@ function vuoto(messaggio) {
 // launchctl parla inglese: running / not running (un job a calendario tra due giri è «a riposo»)
 const STATI_JOB = { running: 'attivo', 'not running': 'a riposo', 'non caricato': 'non caricato' };
 function pillolaJob(stato) {
-  const classe = stato === 'running' ? 'ok' : stato === 'non caricato' ? 'attesa' : '';
-  return el('span', 'pillola ' + classe, [STATI_JOB[stato] || stato]);
+  return Comp.stato(STATI_JOB[stato] || stato, stato === 'running' ? 'ok' : 'neutro');
 }
-
-let aperte = false;  // la lista delle scartate resta aperta dopo un voto
 
 async function vota(titolo, giudizio) {
   try {
@@ -52,34 +48,87 @@ function votoScartata(c, testo, giudizio) {
   return b;
 }
 
-// Dal feed alla lettura: quante novità sono arrivate e quante sono sopravvissute a ogni stadio.
-function imbutoRadar(righe) {
-  const max = Math.max(1, ...righe.map(r => r[1]));
-  return el('div', 'imbuto', righe.map(([nome, n, nota]) => {
-    const riempi = el('span', 'riempi', []);
-    riempi.style.width = (n ? Math.max(1.5, n / max * 100) : 0) + '%';
-    return el('div', 'riga-imbuto', [el('span', '', [nome, nota ? el('small', '', [nota]) : '']), el('div', 'barra', [riempi]), el('b', '', [String(n)])]);
-  }));
+const nelPiano = new Set();  // titoli già aggiunti al piano in questa sessione: la riga mostra «Nel piano»
+
+// Dialogo di conferma: il testo è modificabile (max 200); la rotta scrive in docs/piano.md solo dopo «Aggiungi».
+function confermaPiano(n, riga) {
+  const d = el('dialog', 'dialogo-piano', []);
+  d.setAttribute('aria-label', 'Aggiungi al piano');
+  const campo = el('input', '', []);
+  campo.type = 'text'; campo.maxLength = 200; campo.value = ('Leggere: ' + n.titolo).slice(0, 200);
+  campo.id = 'piano-testo';
+  const esito = el('p', 'sub esito-piano', []);
+  esito.setAttribute('aria-live', 'polite');
+  const aggiungi = el('button', 'primario', ['Aggiungi']);
+  aggiungi.type = 'submit';
+  const annulla = el('button', '', ['Annulla']);
+  annulla.type = 'button';
+  annulla.addEventListener('click', () => d.close());
+  const lab = el('label', '', ['Testo della voce', campo]);
+  const form = el('form', '', [el('h2', '', ['Aggiungi al piano']), el('p', 'sub', ['Si scrive una riga nuova in docs/piano.md.']), lab, esito, el('div', 'riga-azioni', [aggiungi, annulla])]);
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const testo = campo.value.trim();
+    if (!testo) { esito.textContent = 'Scrivi il testo della voce.'; return; }
+    aggiungi.disabled = true;
+    try {
+      const r = await fetch('/api/piano/aggiungi', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Azione': 'conferma' },
+        body: JSON.stringify({ testo }),
+      });
+      if (r.status === 409) throw new Error('C\'è già una voce uguale nel piano.');
+      if (r.status === 400) throw new Error('Testo non valido: serve una riga di al massimo 200 caratteri.');
+      if (!r.ok) throw new Error('Non è andata (HTTP ' + r.status + ').');
+      nelPiano.add(n.titolo);
+      riga.querySelector('.azioni').replaceChildren(Comp.stato('Nel piano', 'ok'));
+      d.close();
+    } catch (err) { esito.textContent = err.message; aggiungi.disabled = false; }
+  });
+  d.addEventListener('close', () => d.remove());
+  d.appendChild(form);
+  document.body.appendChild(d);
+  d.showModal();
+  campo.select();
 }
+
+function rigaNovita(n) {
+  const azioni = el('div', 'azioni', []);
+  if (nelPiano.has(n.titolo)) azioni.appendChild(Comp.stato('Nel piano', 'ok'));
+  else {
+    const b = el('button', '', ['Aggiungi al piano']);
+    b.type = 'button';
+    azioni.appendChild(b);
+    b.addEventListener('click', () => confermaPiano(n, riga));
+  }
+  const riga = el('li', 'riga-lista riga-novita', [el('span', 'titolo-riga', [titoloNovita(n)]), azioni]);
+  return riga;
+}
+
+const giornoCorto = iso => new Date(iso + 'T12:00').toLocaleDateString('it-IT', { day: 'numeric', month: 'short' });
 
 function renderRadar(radar, inbox, prossimo) {
   const nodo = $('radar');
-  if (!radar) { nodo.replaceChildren(vuoto('Nessun report ancora. Il radar scrive la prima scheda quando gira (lunedì alle 07:30): per provarlo adesso raccogli le novità con scripts/feed.py e lancia «Radar» dalla pagina Avvii.')); return; }
+  const prossimoTesto = prossimo ? new Date(prossimo.replace(' ', 'T')).toLocaleString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' }) : null;
+  if (!radar) {
+    Comp.dato('radar', 'Nessun report ancora' + (prossimoTesto ? ' · prossimo ' + prossimoTesto : ''));
+    nodo.replaceChildren(Comp.cornice('Nessun report ancora. Il radar scrive la prima scheda quando gira: per provarlo adesso raccogli le novità con scripts/feed.py e premi «Aggiorna il radar».'));
+    return;
+  }
   const file = (inbox || []).find(f => f.file.startsWith(radar.data));
   const ricevute = file ? file.voci : null;
   const daLeggere = radar.daLeggere.length, scartate = radar.scartate.length;
-  const prossimoTesto = prossimo ? new Date(prossimo.replace(' ', 'T')).toLocaleString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : '–';
-  const imbuto = el('section', '', [
-    el('h2', '', ['Dal feed alla lettura', el('span', 'sub', ['Report del ' + giorno(radar.data)])]),
-    imbutoRadar([
-      ['Novità ricevute', ricevute === null ? daLeggere + scartate : ricevute, ricevute === null ? 'numero non disponibile' : ''],
-      ['Dopo lo stadio 1', daLeggere + scartate, 'somiglianza con i progetti, soglia 0,5'],
-      ['Dopo lo stadio 2', daLeggere, 'giudizio del modello locale'],
-    ]),
-    el('p', 'sub', ['Prossimo radar: ' + prossimoTesto + '. ' + (daLeggere ? '' : 'In questo giro nessuna novità da leggere.')]),
+  Comp.dato('radar', (daLeggere === 1 ? '1 novità da leggere' : daLeggere + ' novità da leggere') + ' · ultimo radar ' + giornoCorto(radar.data) + (prossimoTesto ? ' · prossimo ' + prossimoTesto : ''));
+  const lettura = el('section', '', [el('h2', '', ['Da leggere']),
+    daLeggere ? el('ul', 'elenco-agenda', radar.daLeggere.map(rigaNovita))
+      : Comp.cornice('Nessuna novità da leggere' + (prossimoTesto ? '. Prossimo radar: ' + prossimoTesto : '') + '.')]);
+  const stadi = [(ricevute === null ? null : ricevute + ' ricevute'), (daLeggere + scartate) + ' dopo lo stadio 1', daLeggere + ' dopo lo stadio 2'].filter(Boolean);
+  const imbuto = el('details', 'resto', [
+    el('summary', '', ['Come ha filtrato: ' + stadi.join(' → ')]),
+    el('p', 'sub', ['Report del ' + giorno(radar.data) + '. Lo stadio 1 tiene le novità simili ai progetti (soglia 0,5); lo stadio 2 è il giudizio del modello locale.' + (ricevute === null ? ' Il numero delle ricevute non è disponibile.' : '')]),
   ]);
-  const lettura = daLeggere ? el('section', '', [el('h2', '', ['Da leggere']), el('ul', '', radar.daLeggere.map(n => el('li', '', [titoloNovita(n)])))]) : '';
-  const tabellaScartate = scartate ? el('div', '', [el('table', 'scartate', [
+  const vecchie = nodo.querySelector('details.scartate-lista');
+  const tabella = el('table', 'scartate', [
     el('thead', '', [el('tr', '', [el('th', '', ['Novità']), el('th', '', ['Progetto']), el('th', 'num', ['Score']), el('th', '', ['Il filtro ha sbagliato?'])])]),
     el('tbody', '', radar.scartate.map(c => el('tr', '', [
       el('td', '', [el('details', '', [el('summary', '', [c.titolo]), el('p', 'sub', [c.motivo || 'Nessun motivo registrato.'])])]),
@@ -87,12 +136,13 @@ function renderRadar(radar, inbox, prossimo) {
       el('td', 'num', [c.score === null ? '–' : String(c.score).replace('.', ',')]),
       el('td', '', [votoScartata(c, 'Falso scarto', 'falso-scarto'), ' ', votoScartata(c, 'Scarto giusto', 'scarto-giusto')]),
     ]))),
-  ])]) : vuoto('Nessuna novità scartata dallo stadio 2.');
-  const sezScartate = el('section', '', [
-    el('h2', '', ['Scartate dallo stadio 2', el('span', 'sub', [radar.falsiScarti + ' falsi scarti su ' + radar.valutate + ' valutate'])]),
-    tabellaScartate,
   ]);
-  nodo.replaceChildren(imbuto, lettura, sezScartate);
+  const sezScartate = el('details', 'resto scartate-lista', [
+    el('summary', '', ['Scartate dallo stadio 2 (' + scartate + ') · ' + radar.falsiScarti + ' falsi scarti su ' + radar.valutate]),
+    scartate ? el('div', '', [tabella]) : Comp.cornice('Nessuna novità scartata dallo stadio 2.'),
+  ]);
+  if (vecchie && vecchie.open) sezScartate.open = true;  // un voto non richiude la lista
+  nodo.replaceChildren(lettura, imbuto, sezScartate);
 }
 
 function renderSistema(s) {
@@ -138,61 +188,34 @@ function renderJobVault(s) {
   );
 }
 
-function aggiornaKpi(s) {
-  $('kpi-radar').textContent = s.radar ? s.radar.daLeggere.length : '–';
-}
-
 const FONTI_SPUNTABILI = ['piano', 'scadenze'];
 
-function voceSpuntabile(v, nodoTesto) {
-  const casella = el('input', '', []);
-  casella.type = 'checkbox';
-  casella.checked = !!v.fatto;
-  casella.setAttribute('aria-label', 'Fatto: ' + v.testo);
-  casella.addEventListener('change', () => spunta(v, casella));
-  return el('label', 'voce', [casella, nodoTesto]);
+function bottoneFatto(v) {
+  const b = el('button', 'b-fatto', ['Fatto']);
+  b.type = 'button';
+  b.setAttribute('aria-label', 'Fatto: ' + v.testo);
+  b.addEventListener('click', () => spunta(v, b));
+  return b;
 }
 
-async function spunta(v, casella) {
-  const fatto = casella.checked;
-  casella.disabled = true;
-  casella.closest('li').classList.toggle('fatto', fatto);
+async function spunta(v, bottone) {
+  bottone.disabled = true;
+  const riga = bottone.closest('li');
+  riga.classList.add('fatto');
   try {
     const r = await fetch('/api/spunte', {
       method: 'POST',
       headers: { 'X-Azione': 'conferma', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fonte: v.fonte, data: v.data || null, testo: v.testo, fatto }),
+      body: JSON.stringify({ fonte: v.fonte, data: v.data || null, testo: v.testo, fatto: true }),
     });
     if (!r.ok) throw new Error(r.status === 404 ? 'la voce è cambiata nel file' : r.status === 409 ? 'nel file ci sono due voci uguali' : 'HTTP ' + r.status);
     setTimeout(() => CARICA[vista](), 700);
   } catch (e) {
-    casella.checked = !fatto;
-    casella.disabled = false;
-    casella.closest('li').classList.toggle('fatto', !fatto);
+    bottone.disabled = false;
+    riga.classList.remove('fatto');
     $('fresco').className = 'fresco errore';
     $('fresco').textContent = 'spunta non salvata: ' + e.message;
   }
-}
-
-function testoVoce(c) {
-  return el('span', 'testo', [
-    c.data ? el('span', 'mono quando', [c.data]) : '',
-    c.inRitardo ? el('span', 'pillola attesa', ['in ritardo']) : '',
-    el('span', '', [c.testo]),
-  ]);
-}
-
-function renderOggi(o) {
-  const nodo = $('oggi');
-  if (!o.senzaData.length) { nodo.replaceChildren(); return; }
-  nodo.replaceChildren(el('details', '', [
-    el('summary', '', ['Senza data (' + o.senzaData.length + ')']),
-    el('ul', 'piano-voci', o.senzaData.map(v => el('li', '', [
-      FONTI_SPUNTABILI.includes(v.fonte)
-        ? voceSpuntabile({ ...v, fatto: false }, el('span', 'testo', [el('span', '', [v.testo])]))
-        : el('span', 'voce', [el('span', 'testo', [el('span', 'mono quando', [v.fonte.replace('progetto:', '')]), el('span', '', [v.testo])])]),
-    ]))),
-  ]));
 }
 
 const NOMI_FONTE = { calendario: 'calendario', piano: 'piano', scadenze: 'scadenza', rinnovo: 'rinnovo', post: 'post' };
@@ -204,15 +227,53 @@ function intestazioneGiorno(iso) {
   return diff === 0 ? 'Oggi' : diff === 1 ? 'Domani' : d.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' });
 }
 
-function rigaAspetta(v) {
-  const contenuto = el('span', 'testo', [
-    el('span', 'ora', [v.ora ? v.ora + (v.fine ? '–' + v.fine : '') : v.fonte === 'calendario' ? 'tutto il giorno' : 'senza ora']),
-    el('span', '', [v.titolo + (v.inCorso ? ' (in corso)' : '')]),
-    ...(v.dettaglio ? [el('span', 'sub', [v.dettaglio])] : []),
-    el('span', 'pillola' + (v.inRitardo ? ' negativa' : v.lavoro ? ' avviso' : ''), [v.inRitardo ? 'in ritardo dal ' + giorno(v.originale) : v.lavoro ? 'lavoro' : NOMI_FONTE[v.fonte] || v.fonte]),
+// Una riga dell'Agenda: ora e testo (senza #tag, al massimo 2 righe con il testo intero nel title), sotto stato e nodo; a destra le azioni, sempre nello stesso posto.
+function rigaAgenda(v) {
+  const piano = v.fonte === 'piano';
+  const intero = v.titolo || v.testo;
+  const { testo, tag } = piano ? Comp.senzaTag(intero) : { testo: intero, tag: null };
+  const { testo: breve, resto } = Comp.prima(testo, 140);  // frasi intere, il resto dietro «Mostra tutto»
+  const titolo = el('span', 'titolo-riga', [breve]);
+  titolo.title = intero.replace(/`/g, '');
+  const sotto = [];
+  if (v.inRitardo) sotto.push(Comp.stato('dal ' + new Date(v.originale + 'T12:00').toLocaleDateString('it-IT', { day: 'numeric', month: 'short' }), 'neutro'));
+  if (v.inCorso) sotto.push(Comp.stato('in corso', 'attenzione'));
+  if (v.lavoro) sotto.push(Comp.stato('lavoro', 'attenzione'));
+  if (tag) sotto.push(Comp.stato(tag, 'neutro'));
+  if (!piano) sotto.push(el('span', '', [NOMI_FONTE[v.fonte] || String(v.fonte).replace('progetto:', '')]));
+  if (v.fonte === 'calendario') sotto.push(el('span', '', [v.ora ? (v.fine ? 'fino alle ' + v.fine : '') : 'tutto il giorno']));
+  if (v.dettaglio) sotto.push(el('span', '', [v.dettaglio]));
+  const azioni = el('div', 'azioni', []);
+  if (piano && tag && window.Mappa) {  // solo se il nodo ha una cartella: lo dicono i dati della mappa
+    window.Mappa.nodoDi(tag).then(n => {
+      if (!n || !n.haCartella) return;
+      const b = el('button', '', ['Avvia in Claude']);
+      b.type = 'button';
+      b.addEventListener('click', () => window.Mappa.avviaVoce(v));
+      azioni.prepend(b);
+    });
+  }
+  if (FONTI_SPUNTABILI.includes(v.fonte)) azioni.appendChild(bottoneFatto(v));  // «Fatto» sempre all'estremo destro
+  return el('li', 'riga-lista riga-agenda', [
+    el('div', 'corpo', [el('span', 'quando', [v.ora || '']), titolo, ...(resto ? [el('details', 'resto-testo', [el('summary', '', ['Mostra tutto']), el('p', '', [resto])])] : []), el('span', 'dettagli', sotto)]),
+    azioni,
   ]);
-  return el('li', 'riga-aspetta', [FONTI_SPUNTABILI.includes(v.fonte) ? voceSpuntabile({ fonte: v.fonte, data: v.data, testo: v.testo, fatto: false }, contenuto) : el('span', 'voce senza-casella', [contenuto])]);
 }
+
+const elencoAgenda = (voci, max) => {
+  const ul = el('ul', 'elenco-agenda' + (voci.some(v => v.ora) ? ' con-ora' : ''), []);  // la colonna dell'ora c'è solo se almeno una voce ha l'ora
+  ul.appendChild(Comp.mostraTutto(voci, max, rigaAgenda));
+  return ul;
+};
+
+function renderOggi(o) {
+  $('oggi').replaceChildren(...(o.senzaData.length ? [el('details', 'resto', [
+    el('summary', '', ['Senza data (' + o.senzaData.length + ')']),
+    elencoAgenda(o.senzaData, o.senzaData.length),
+  ])] : []));
+}
+
+const isoLocale = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 
 function renderAspetta(a) {
   const gruppi = [];
@@ -222,12 +283,17 @@ function renderAspetta(a) {
     if (!g) { g = { chiave, titolo: v.inRitardo ? 'In ritardo' : intestazioneGiorno(v.giorno), voci: [] }; gruppi.push(g); }
     g.voci.push(v);
   }
-  // I post scaduti da più di due giorni stanno chiusi in grigio con il conteggio: il rosso resta per ciò che serve oggi.
-  $('aspetta').replaceChildren(...(gruppi.length
-    ? gruppi.flatMap(g => g.chiave === 'arretrati'
-      ? [el('details', 'arretrati', [el('summary', '', ['Post arretrati (' + g.voci.length + ')']), el('ul', 'piano-voci', g.voci.map(rigaAspetta))])]
-      : [el('h3', 'giorno-aspetta' + (g.chiave === 'ritardo' ? ' ritardo' : ''), [g.titolo]), el('ul', 'piano-voci', g.voci.map(rigaAspetta))])
-    : [vuoto('Niente in programma nei prossimi 7 giorni.')]));
+  // I post scaduti da più di due giorni stanno chiusi con il conteggio: il rosso resta per ciò che serve oggi.
+  const attivi = gruppi.filter(g => g.chiave !== 'arretrati');
+  const arretrati = gruppi.find(g => g.chiave === 'arretrati');
+  $('aspetta').replaceChildren(
+    ...(attivi.length ? attivi.flatMap(g => [el('h3', 'giorno-aspetta', [g.titolo + (g.chiave === 'ritardo' ? ' (' + g.voci.length + ')' : '')]), elencoAgenda(g.voci, 5)])
+      : [Comp.cornice('Niente in programma nei prossimi 7 giorni.')]),
+    ...(arretrati ? [el('details', 'resto', [el('summary', '', ['Post arretrati (' + arretrati.voci.length + ')']), elencoAgenda(arretrati.voci, arretrati.voci.length)])] : []));
+  const oggi = isoLocale(new Date());
+  const conta = f => a.voci.filter(v => !v.arretrato && f(v)).length;
+  Comp.dato('agenda', new Date().toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' }) + ': '
+    + conta(v => v.inRitardo) + ' in ritardo, ' + conta(v => !v.inRitardo && v.giorno === oggi) + ' oggi, ' + conta(v => !v.inRitardo && v.giorno > oggi) + ' nei prossimi 7 giorni');
   const c = a.calendario;
   $('aspetta-calendario').textContent = c.stato === 'caricamento' ? 'Sto leggendo il calendario: le prime volte ci mette un minuto o più.'
     : c.stato === 'errore' ? 'Il calendario non risponde (' + c.errore.slice(0, 120) + '): sotto vedi solo scadenze e post.'
@@ -235,27 +301,20 @@ function renderAspetta(a) {
     : 'Appuntamenti letti dal calendario alle ' + new Date(c.aggiornato).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) + '. Quali calendari mostrare: docs/calendari.md.'
       + (c.avvisi && c.avvisi.length ? ' Attenzione: ' + c.avvisi.join('; ').slice(0, 200) : '');
   if (c.stato === 'caricamento' && !ripetiAspetta) ripetiAspetta = setTimeout(() => { ripetiAspetta = null; if (vista === 'agenda') aggiorna(); }, 10000);
-  const n = a.novita;
-  $('aspetta-novita').replaceChildren(n.daLeggere.length
-    ? el('ul', 'piano-voci', n.daLeggere.map(x => el('li', 'riga-aspetta', [el('span', 'voce senza-casella', [el('span', 'testo', [titoloNovita(x)])])])))
-    : vuoto('Nessuna novità rilevante nell\'ultimo giro' + (n.data ? ' (' + giorno(n.data) + ')' : '') + '.'));
+  const nn = a.novita.daLeggere.length;
+  $('agenda-radar').hidden = !nn;
+  if (nn) $('agenda-radar').firstElementChild.textContent = nn + ' novità da leggere → Radar';
 }
 
 const ETICHETTE = { morning: 'morning', 'chiudi-giornata': 'chiusura della giornata', radar: 'radar', pulizia: 'pulizia del venerdì', bozze: 'la preparazione delle bozze' };
 
+let esecuzioniLette = null;   // gli ultimi log dei job: li mostra la riga aperta di Avvii
+
 function renderEsecuzioni(e) {
-  const righe = Object.keys(ETICHETTE).map(nome => el('li', '', [
-    ...(e[nome].inCorso ? [el('span', 'pillola attesa', ['in corso']), ' '] : []),
-    ETICHETTE[nome],
-    el('details', '', [
-      el('summary', '', ['Ultime righe del log']),
-      el('ul', 'mono', e[nome].ultimeRighe.map(r => el('li', '', [r]))),
-    ]),
-  ]));
-  $('esecuzioni').replaceChildren(
-    el('ul', 'piano-voci', righe),
-    el('details', '', [el('summary', '', ['Ultimi commit del vault']), el('ul', 'mono', e.commit.map(c => el('li', '', [c])))]),
-  );
+  esecuzioniLette = e;
+  const ba = $('radar-aggiorna');
+  if (ba) { ba.disabled = e.radar.inCorso; ba.textContent = e.radar.inCorso ? 'In corso…' : 'Aggiorna il radar'; }
+  if (vista === 'avvii' && ultimiAvvii) renderAvvii(ultimiAvvii);
 }
 
 async function aggiornaEsecuzioni() {
@@ -345,7 +404,6 @@ async function aggiorna() {
     const r = await fetch('/api/stato', { cache: 'no-store' });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const s = await r.json();
-    aggiornaKpi(s);
     renderRadar(s.radar, s.inbox, s.prossimoRadar);
     renderSistema(s);
     renderJobVault(s);
@@ -362,6 +420,7 @@ async function aggiorna() {
   } catch (e) {
     $('fresco').className = 'fresco errore';
     $('fresco').textContent = 'errore nel caricamento: ' + e.message;
+    if (vista === 'agenda') $('aspetta').replaceChildren(Comp.errore('Non riesco a leggere l\'agenda.', aggiorna));
   }
 }
 
@@ -482,7 +541,7 @@ function schedaAppuntamento(d) {
     nota.textContent = !val(ora) ? 'Manca l\'ora: scrivila prima di aggiungere.' : '';
     aggiungi.disabled = !val(titolo).trim() || !val(data) || !val(ora) || !scelti.some(c => c.checked);
   };
-  const aggiungi = el('button', 'primario', ['Aggiungi al calendario']); aggiungi.type = 'button';
+  const aggiungi = el('button', '', ['Aggiungi al calendario']); aggiungi.type = 'button';
   const annulla = el('button', '', ['Non aggiungere']); annulla.type = 'button';
   annulla.addEventListener('click', () => $('appuntamento-scheda').replaceChildren());
   aggiungi.addEventListener('click', async () => {
@@ -509,16 +568,13 @@ function schedaAppuntamento(d) {
     ...(d.conflitti.length ? [el('p', 'sub avviso-testo', ['Si sovrappone a: ' + d.conflitti.join(', ') + '.'])] : []),
     nota, el('div', 'riga-azioni', [aggiungi, annulla]), esito]);
 }
-$('appuntamento-form').addEventListener('submit', async e => {
-  e.preventDefault();
-  const frase = $('appuntamento-frase').value.trim();
+async function preparaAppuntamento(frase) {
   if (frase.length < 2) return;
   $('appuntamento-scheda').replaceChildren(el('p', 'sub', ['Sto leggendo la frase…']));
   try { $('appuntamento-scheda').replaceChildren(schedaAppuntamento(await postAssistente('proponi', { frase }))); }
   catch (e) { $('appuntamento-scheda').replaceChildren(el('p', 'sub', ['Non ho capito: ' + e.message])); }
-});
+}
 
-const DOMANDE_ASSISTENTE = ['Cosa devo fare oggi?', 'Cosa scade questa settimana?', 'Dove trovo un\'ora libera domani?'];
 async function chiediAssistente(domanda) {
   const r = $('assistente-risposta'), n = $('assistente-nota'), b = $('assistente-form').querySelector('button');
   r.textContent = 'Sto pensando…'; n.textContent = ''; b.disabled = true;
@@ -530,8 +586,13 @@ async function chiediAssistente(domanda) {
     n.textContent = d.pronto ? 'Risposta di ' + etichettaModello() + ' in ' + d.secondi + ' s, dai dati del Calendario letti ' + quando(d.calendario.aggiornato) + '. Può sbagliare: controlla le date.' : '';
   } catch (e) { r.textContent = 'Non ho potuto chiedere: ' + e.message; } finally { b.disabled = false; }
 }
-$('assistente-form').addEventListener('submit', e => { e.preventDefault(); const q = $('assistente-domanda').value.trim(); if (q.length >= 2) chiediAssistente(q); });
-$('assistente-chip').replaceChildren(...DOMANDE_ASSISTENTE.map(q => { const c = el('button', '', [q]); c.type = 'button'; c.addEventListener('click', () => { $('assistente-domanda').value = q; chiediAssistente(q); }); return c; }));
+// Una sola casella: «Aggiungi ...» prepara un appuntamento, ogni altra frase è una domanda.
+$('assistente-form').addEventListener('submit', e => {
+  e.preventDefault();
+  const q = $('assistente-domanda').value.trim();
+  const aggiungi = /^aggiungi\b\s*:?\s*/i.exec(q);
+  if (aggiungi) preparaAppuntamento(q.slice(aggiungi[0].length)); else if (q.length >= 2) chiediAssistente(q);
+});
 const GIORNI = ['dom', 'lun', 'mar', 'mer', 'gio', 'ven', 'sab'];
 
 function barraUso(etichetta, parte, classe, valore) {
@@ -573,13 +634,24 @@ function renderClaude(c) {
   $('p-claude-nota').textContent = 'Letto da Claude Code il ' + quando(c.aggiornato) + '. Non salva un limite giornaliero: restano la finestra di 5 ore e quella settimanale. Si aggiorna solo quando lo chiede lui: per il dato fresco usa /usage nella sessione.';
 }
 
+// Il viewBox ha la larghezza reale del contenitore: scala 1, i testi restano di 11,5px a ogni larghezza.
+// Un grafico disegnato mentre la pagina è nascosta (larghezza 0) o prima di un ridimensionamento si ridisegna da solo.
+// Sotto i 560px il grafico non si stringe: resta largo 560 e scorre di lato.
+const cacheGrafici = { consumo: null, wConsumo: 0 };
+const larghezzaGrafico = id => Math.max(560, Math.round($(id).clientWidth) || 900);
+new ResizeObserver(() => {
+  if (cacheGrafici.consumo && larghezzaGrafico('p-consumo') !== cacheGrafici.wConsumo) renderConsumo(cacheGrafici.consumo);
+}).observe(document.body);
+
 // Token per giorno: una serie, una tinta, 4 linee di griglia leggere, asse con valori tondi.
 function renderConsumo(c) {
   const giorni = c.giorni, max = Math.max(1, ...giorni.map(g => g.token));
   const passo = [1, 2, 2.5, 5, 10].map(m => m * 10 ** Math.floor(Math.log10(max / 4))).find(v => v >= max / 4) || max;
-  const alto = Math.ceil(max / passo) * passo, W = 900, H = 240, sx = 56, bx = 28, by = 190;
+  const alto = Math.ceil(max / passo) * passo, W = cacheGrafici.wConsumo = larghezzaGrafico('p-consumo'), H = 240, sx = 56, bx = 28, by = 190;
+  cacheGrafici.consumo = c;
   const asse = Array.from({ length: alto / passo + 1 }, (_, i) => i * passo);
   const larg = (W - sx - bx) / giorni.length;
+  const passoEtichette = Math.max(giorni.length <= 8 ? 1 : W < 700 ? 3 : 2, Math.ceil(48 / larg));  // una data ogni 3 giorni se stretto
   const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Token elaborati da Claude Code in ciascuno degli ultimi ' + giorni.length + ' giorni' });
   for (const v of asse) {
     const y = by - (v / alto) * (by - 14);
@@ -588,14 +660,20 @@ function renderConsumo(c) {
   }
   giorni.forEach((g, i) => {
     const h = (g.token / alto) * (by - 14), x = sx + i * larg + larg * 0.16, w = larg * 0.68;
-    const r = sv('rect', { x, y: by - h, width: w, height: Math.max(h, g.token ? 2 : 0), rx: 3, class: 'colonna' });
+    const r = sv('rect', { x, y: by - h, width: w, height: Math.max(h, g.token ? 2 : 0), rx: 3, class: 'colonna' + (i === giorni.length - 1 ? ' ultima' : '') });
     const tip = sv('title'); tip.textContent = new Date(g.data + 'T12:00').toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' }) + ': ' + new Intl.NumberFormat('it-IT').format(g.token) + ' token, ' + g.messaggi + ' risposte';
     r.append(tip); svg.append(r);
-    if (i % 2 === giorni.length % 2 || giorni.length <= 8) {
+    if (i === giorni.length - 1 && g.token) {  // il valore sopra l'ultima barra
+      const v = sv('text', { x: x + w / 2, y: by - h - 6, 'text-anchor': 'middle', class: 'asse-testo valore' }); v.textContent = new Intl.NumberFormat('it-IT', { notation: 'compact' }).format(g.token); svg.append(v);
+    }
+    if ((giorni.length - i) % passoEtichette === 0) {
       const t = sv('text', { x: x + w / 2, y: by + 20, 'text-anchor': 'middle', class: 'asse-testo' }); t.textContent = new Date(g.data + 'T12:00').toLocaleDateString('it-IT', { day: 'numeric', month: 'short' }); svg.append(t);
     }
   });
-  $('p-consumo').replaceChildren(svg, el('p', 'sub', ['Input, output e scrittura in cache di Claude Code su questo Mac, letti dalle sessioni locali. Non coincide con il limite del piano: mostra quanto lavoro ha fatto ogni giorno.']));
+  const scorri = el('div', 'scorri', [svg]);
+  scorri.tabIndex = 0; scorri.setAttribute('role', 'region'); scorri.setAttribute('aria-label', 'Grafico dei token al giorno (scorre di lato)');
+  setTimeout(() => { scorri.scrollLeft = scorri.scrollWidth; }, 0);  // stretto: si parte dai giorni più recenti
+  $('p-consumo').replaceChildren(scorri, el('p', 'sub', ['Input, output e scrittura in cache di Claude Code su questo Mac, letti dalle sessioni locali. Non coincide con il limite del piano: mostra quanto lavoro ha fatto ogni giorno.']));
 }
 
 async function aggiornaPrestazioni() {
@@ -609,6 +687,8 @@ async function aggiornaPrestazioni() {
     const giudizio = p.chiamate.perOperazione.giudizio;
     $('p-velocita').textContent = giudizio && giudizio.tokenAlSecondoMedia !== null ? giudizio.tokenAlSecondoMedia.toFixed(1).replace('.', ',') : '–';
     renderClaude(p.claude);
+    datiConsumi.claude = p.claude;
+    datoConsumi();
     renderConsumo(p.consumo);
     renderInstallati(p);
     renderModelliProcessi(p);
@@ -680,9 +760,9 @@ function pulsanteInterruttore(tipo, nome, attivo) {
   });
 }
 
-function pulsanteAggiorna(x) {
-  if (!x.azione.startsWith('aggiornare')) return el('p', 'segnalazione', ['Per aggiornarla serve il tuo «installa lo stesso» in chat.']);
-  const b = pulsante('Aggiorna', 'primario', async () => {
+function pulsanteAggiorna(x, primario) {
+  if (!x.azione.startsWith('aggiornare')) return null;
+  const b = pulsante('Aggiorna', primario ? 'primario' : '', async () => {
     if (!confirm('Aggiornare ' + x.nome + ' da ' + x.installata + ' a ' + x.disponibile + '?\nRiscarico il repo, rifaccio la scansione e, se è ancora senza segnalazioni gravi, sostituisco la cartella. Il backup della vecchia resta in ~/.agents/skills-backup.')) throw new Error('aggiornamento annullato');
     const d = await chiamaConfig('/api/configurazione/aggiorna', { nome: x.nome, atteso: x.disponibile });
     return x.nome + ' aggiornata a ' + d.versione + '. Backup in ' + d.backup + '. Vale dalla prossima sessione.';
@@ -713,31 +793,50 @@ function pulsanteAggiornaTutte(lista, saltate) {
   });
 }
 
+// Il gergo dello scanner sta solo qui, dietro un dettaglio per riga.
+function dettaglioScanner(x) {
+  const sc = x.scansione;
+  const esito = !sc || sc.errore ? 'Scansione non riuscita.' : 'Livello ' + sc.severita + ', punteggio ' + sc.score + ', ' + sc.raccomandazione + '.';
+  const seg = sc && sc.segnalazioni ? sc.segnalazioni.map(g => el('li', 'mono', [g.severita + ' · ' + g.file + ':' + g.riga + ' · ' + g.testo])) : [];
+  return el('details', 'resto', [el('summary', '', ['Dettaglio scansione']), el('p', 'sub', [esito]), seg.length ? el('ul', '', seg) : '']);
+}
+
+// Un solo verdetto in parole, col tono giusto.
+function verdettoSkill(x) {
+  const sc = x.scansione;
+  if (!sc || sc.errore) return Comp.stato('scansione non riuscita', 'errore');
+  if (x.azione.startsWith('aggiornare')) return Comp.stato('si può aggiornare', 'ok');
+  return Comp.stato('chiede la tua conferma: segnalazioni da leggere', 'attenzione');
+}
+
+function rigaAggiornamento(x, primario) {
+  const azione = pulsanteAggiorna(x, primario);
+  return el('div', 'riga-lista conf-riga', [
+    el('div', '', [el('b', '', [x.nome]), el('span', 'sub num', [x.installata + ' → ' + x.disponibile]), el('div', '', [verdettoSkill(x)]), dettaglioScanner(x)]),
+    el('span', 'azioni', azione ? [azione] : [el('span', 'sub nota-azione', ['serve il tuo ok in chat'])]),
+  ]);
+}
+
+const giornoBreveIso = iso => new Date(iso + 'T12:00').toLocaleDateString('it-IT', { day: 'numeric', month: 'short' });
+
 function renderAggiornamenti(c) {
-  if (!c) return [el('h3', 'riga-titolo', ['Aggiornamenti delle skill', pulsanteControlla()]), vuoto('Nessun controllo ancora: parte il venerdì alle 18:00, oppure premi «Controlla ora».')];
+  if (!c) return [Comp.cornice('Nessun controllo ancora: parte il venerdì alle 18:00, oppure premi «Controlla ora».')];
   const fonti = c.fonti.map(f => f.url.replace('https://github.com/', '').replace('.git', '') + ' ' + f.commit + ' del ' + f.data).join(' · ');
   const nuove = c.skill.filter(x => x.stato === 'nuova');
   const altre = (stato, titolo) => {
     const l = c.skill.filter(x => x.stato === stato);
-    return l.length ? el('details', '', [el('summary', '', [titolo + ' (' + l.length + ')']), nomi(l.map(x => x.nome), '')]) : '';
+    return l.length ? el('details', 'resto', [el('summary', '', [titolo + ' (' + l.length + ')']), nomi(l.map(x => x.nome), '')]) : '';
   };
   const lock = c.skill.filter(x => x.stato === 'uguale' && !x.lockAllineato);
   const aggiornabili = nuove.filter(x => x.azione.startsWith('aggiornare'));
+  const unica = aggiornabili.length === 1 ? aggiornabili[0] : null;
   return [
-    el('h3', 'riga-titolo', ['Aggiornamenti delle skill', pulsanteControlla()]),
-    el('p', 'sub', ['Controllo del ' + c.generato.slice(0, 10) + ', repo letti: ' + fonti + '. Il controllo non installa nulla: per ogni aggiornamento serve il tuo ok.']),
-    aggiornabili.length > 1 ? el('p', '', [pulsanteAggiornaTutte(aggiornabili, nuove.length - aggiornabili.length)]) : '',
-    nuove.length
-      ? tabella(['Skill', 'Installata → disponibile', 'Scansione', 'Azione suggerita'], nuove.map(x => {
-          const sc = x.scansione;
-          const esito = !sc || sc.errore ? 'non riuscita' : sc.severita + ', punteggio ' + sc.score + ', ' + sc.raccomandazione;
-          const seg = sc && sc.segnalazioni ? sc.segnalazioni.map(g => el('p', 'segnalazione', [g.severita + ' · ' + g.file + ':' + g.riga + ' · ' + g.testo])) : [];
-          return [x.nome, x.installata + ' → ' + x.disponibile, el('div', '', [esito, ...seg]), el('div', '', [el('span', 'pillola ' + (x.azione.startsWith('aggiornare') ? 'ok' : 'attesa'), [x.azione]), pulsanteAggiorna(x)])];
-        }))
-      : vuoto('Nessuna versione nuova disponibile.'),
+    nuove.length ? el('div', 'conf-elenco', nuove.map(x => rigaAggiornamento(x, x === unica))) : Comp.cornice('Nessuna versione nuova disponibile.'),
     altre('modificata', 'Modificate in locale, repo invariato'),
     altre('rimossa', 'Non più nel repo di origine'),
-    lock.length ? el('details', '', [el('summary', '', ['Aggiornate a mano, con lock obsoleto (' + lock.length + ')']), nomi(lock.map(x => x.nome), '')]) : '',
+    lock.length ? el('details', 'resto', [el('summary', '', ['Aggiornate a mano, con lock obsoleto (' + lock.length + ')']), nomi(lock.map(x => x.nome), '')]) : '',
+    el('details', 'resto', [el('summary', '', ['Ultimo controllo ' + giornoBreveIso(c.generato.slice(0, 10))]),
+      el('p', 'sub', ['Repo letti: ' + fonti + '. Il controllo non installa nulla: per ogni aggiornamento serve il tuo ok.'])]),
     ...c.errori.map(e => el('p', 'sub', ['Errore: ' + e])),
   ];
 }
@@ -792,7 +891,8 @@ let schedaConf = null;
 function pannelloProgettiConf(progetti) {
   const totale = p => p.skill.length + p.comandi.length + p.agenti.length;
   const max = Math.max(1, ...progetti.map(totale));
-  const barre = el('div', 'imbuto', [...progetti].sort((a, b) => totale(b) - totale(a)).map(p => {
+  const vuoti = progetti.filter(p => !totale(p));
+  const barre = el('div', 'imbuto', [...progetti].filter(p => totale(p)).sort((a, b) => totale(b) - totale(a)).map(p => {
     const riempi = el('span', 'riempi', []);
     riempi.style.width = (totale(p) ? Math.max(1.5, totale(p) / max * 100) : 0) + '%';
     return el('div', 'riga-imbuto', [el('span', '', [p.nome, el('small', '', [p.skill.length + ' skill · ' + p.comandi.length + ' comandi · ' + p.agenti.length + ' agenti'])]), el('div', 'barra', [riempi]), el('b', '', [String(totale(p))])]);
@@ -802,35 +902,32 @@ function pannelloProgettiConf(progetti) {
     p.nome + (p.esiste ? '' : ' (cartella non trovata)'), elenco(p.skill), elenco(p.comandi), elenco(p.agenti),
     elenco(p.plugin.map(([n, v]) => n + (v ? '' : ' (disattivato)'))), elenco(p.hook), elenco(p.mcp),
   ]));
-  return [el('p', 'sub', ['Skill, comandi e agenti definiti dentro ogni progetto. Solo i nomi: niente variabili né chiavi.']), barre, tab];
+  return [el('p', 'sub', ['Skill, comandi e agenti definiti dentro ogni progetto. Solo i nomi: niente variabili né chiavi.']), barre, vuoti.length ? el('p', 'sub', ['Senza strumenti propri: ' + vuoti.map(p => p.nome).join(', ') + '.']) : '', tab];
 }
 
 function renderConfigurazione(d) {
   const g = renderGlobale(d.globale);
   const attive = d.globale.skill.filter(x => x.attiva).length;
   const plugin = d.globale.plugin, pluginAttivi = plugin.filter(x => x.attivo).length;
-  const controllo = renderAggiornamenti(d.controllo);
   const daFare = ((d.controllo && d.controllo.skill) || []).filter(x => /^(aggiornare|chiedere)/.test(x.azione || '')).length;
+  const aggiornabili = ((d.controllo && d.controllo.skill) || []).filter(x => x.stato === 'nuova' && x.azione.startsWith('aggiornare'));
   const pannelli = {
-    aggiornamenti: ['Aggiornamenti', controllo],
-    plugin: ['Plugin', g.plugin],
-    skill: ['Skill', g.skill],
+    aggiornamenti: ['Aggiornamenti ' + daFare, renderAggiornamenti(d.controllo)],
+    plugin: ['Plugin ' + pluginAttivi + '/' + plugin.length, g.plugin],
+    skill: ['Skill ' + attive + '/' + d.globale.skill.length, g.skill],
     sincronizzati: ['Sincronizzati', g.sincronizzati],
-    progetti: ['Progetti', pannelloProgettiConf(d.progetti)],
+    progetti: ['Progetti ' + d.progetti.length, pannelloProgettiConf(d.progetti)],
   };
   if (!pannelli[schedaConf]) schedaConf = daFare ? 'aggiornamenti' : 'plugin';
-  const kpi = el('ul', 'riepilogo', [
-    el('li', '', [el('b', daFare ? 'dato' : '', [String(daFare)]), el('span', '', ['aggiornamenti delle skill da valutare'])]),
-    el('li', '', [el('b', '', [pluginAttivi + ' su ' + plugin.length]), el('span', '', ['plugin attivi'])]),
-    el('li', '', [el('b', '', [attive + ' su ' + d.globale.skill.length]), el('span', '', ['skill attive'])]),
-    el('li', '', [el('b', '', [String(d.progetti.length)]), el('span', '', ['progetti con strumenti propri'])]),
-  ]);
-  const scelta = el('div', 'scelta', Object.entries(pannelli).map(([chiave, [nome]]) => {
-    const b = el('button', '', [nome]); b.type = 'button'; b.setAttribute('aria-pressed', String(chiave === schedaConf));
-    b.addEventListener('click', () => { schedaConf = chiave; renderConfigurazione(d); });
-    return b;
-  }));
-  $('conf-contenuto').replaceChildren(kpi, scelta, el('section', 'conf-sez', pannelli[schedaConf][1]));
+  Comp.dato('conf', daFare ? daFare + (daFare === 1 ? ' aggiornamento da valutare' : ' aggiornamenti da valutare') : 'Niente da aggiornare o da decidere');
+  const nonSaltate = ((d.controllo && d.controllo.skill) || []).filter(x => x.stato === 'nuova').length - aggiornabili.length;
+  $('conf-azioni').replaceChildren(el('div', 'riga-azioni', [pulsanteControlla(), aggiornabili.length > 1 ? pulsanteAggiornaTutte(aggiornabili, nonSaltate) : '']));
+  const disegna = () => {
+    $('conf-contenuto').replaceChildren(el('section', 'conf-sez', pannelli[schedaConf][1]));
+    for (const b of $('conf-schede').children) { b.setAttribute('aria-pressed', String(b.dataset.id === schedaConf)); b.tabIndex = b.dataset.id === schedaConf ? 0 : -1; }
+  };
+  Comp.schede($('conf-schede'), Object.entries(pannelli).map(([id, [etichetta]]) => ({ id, etichetta })), schedaConf, id => { schedaConf = id; disegna(); }, 'Sezioni della configurazione');
+  disegna();
 }
 
 async function aggiornaConfigurazione(avvisa = true) {
@@ -848,32 +945,80 @@ async function aggiornaConfigurazione(avvisa = true) {
 }
 
 const STATI_AVVIO = { ok: 'partito', 'in-corso': 'in corso', 'in-attesa': 'non ancora', 'in-ritardo': 'partito in ritardo', mancato: 'non partito', mai: 'mai partito', fallito: 'fallito', saltato: 'saltato' };
-const CLASSE_AVVIO = { ok: 'positiva', 'in-ritardo': 'avviso', mancato: 'negativa', mai: 'negativa', fallito: 'negativa' };
-const NOMI_AVVIO = { morning: 'Morning, ore 8:00', chiusura: 'Chiusura, ore 18:30', radar: 'Radar, lunedì', pulizia: 'Pulizia, venerdì', bozze: 'Bozze, lunedì' };
+// «saltato» = girato senza nulla da fare: grigio. Solo fallito e non partito chiamano l'attenzione.
+const TONO_AVVIO = { ok: 'ok', 'in-ritardo': 'attenzione', mancato: 'attenzione', mai: 'attenzione', fallito: 'errore', saltato: 'neutro' };
+const NOMI_AVVIO = { morning: 'Morning', chiusura: 'Chiusura', radar: 'Radar', pulizia: 'Pulizia', bozze: 'Bozze' };
+const ORARI_AVVIO = { morning: 'ogni giorno alle 8:00', chiusura: 'ogni giorno alle 18:30', radar: 'lunedì', pulizia: 'venerdì', bozze: 'lunedì' };
 const quando = iso => iso ? new Date(iso).toLocaleString('it-IT', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '–';
+let ultimiAvvii = null;
+
+// La riga-dato si conta dagli stati: nessuna cifra scritta a mano
+function riassuntoAvvii(job) {
+  const n = (...st) => job.filter(j => st.includes(j.stato)).length;
+  const parti = [n('ok', 'in-ritardo') + ' partiti', n('saltato') + ' saltati senza nulla da fare', n('fallito') + ' falliti'];
+  if (n('mancato', 'mai')) parti.push(n('mancato', 'mai') + ' non partiti');
+  if (n('in-corso', 'in-attesa')) parti.push(n('in-corso', 'in-attesa') + ' in attesa');
+  return job.length + ' job: ' + parti.join(', ');
+}
+
+function rigaAvvio(j, indice) {
+  const id = 'avvio-' + indice;
+  const nome = NOMI_AVVIO[j.nome] || j.nome;
+  const apri = el('button', 'avvio-apri', [el('span', 'nome', [nome]), el('span', 'sub', [ORARI_AVVIO[j.nome] || ''])]);
+  apri.type = 'button';
+  apri.setAttribute('aria-expanded', 'false');
+  apri.setAttribute('aria-controls', id);
+  const esec = esecuzioniLette && j.azione && esecuzioniLette[j.azione];
+  const righe = esec ? esec.ultimeRighe : [];
+  const dettaglio = el('div', 'avvio-dettaglio', [
+    el('p', '', [j.motivo + '.']),
+    righe.length ? el('ul', 'mono', righe.map(r => el('li', '', [r]))) : Comp.cornice('Nessun log di questo job.'),
+  ]);
+  dettaglio.id = id;
+  dettaglio.hidden = true;
+  apri.addEventListener('click', () => {
+    const aperto = apri.getAttribute('aria-expanded') === 'true';
+    apri.setAttribute('aria-expanded', String(!aperto));
+    dettaglio.hidden = aperto;
+  });
+  const bottone = j.azione ? el('button', '', ['Avvia ora']) : null;
+  if (bottone) {
+    bottone.type = 'button';
+    bottone.setAttribute('aria-label', 'Avvia ora: ' + nome);
+    bottone.addEventListener('click', () => avviaAzione(j.azione));
+  }
+  return el('div', 'avvio-riga', [
+    el('div', 'avvio-testa', [
+      apri,
+      el('span', 'avvio-stato', [Comp.stato(STATI_AVVIO[j.stato] || j.stato || 'sconosciuto', TONO_AVVIO[j.stato] || 'neutro')]),
+      el('span', 'avvio-giro', [el('span', 'etichetta', ['Ultimo giro ']), quando(j.ultimoLog)]),
+      el('span', 'avvio-giro', [el('span', 'etichetta', ['Prossimo ']), quando(j.prossimo)]),
+      el('span', 'avvio-azione', bottone ? [bottone] : []),
+    ]),
+    dettaglio,
+  ]);
+}
 
 function renderAvvii(d) {
+  ultimiAvvii = d;
+  Comp.dato('avvii', d.job.length ? riassuntoAvvii(d.job) : 'Nessun job pianificato');
   $('avvii-mac').textContent = d.macAcceso ? 'Il Mac è acceso dal ' + quando(d.macAcceso) + '.' : '';
-  $('avvii-contenuto').replaceChildren(...d.job.map(j => {
-    const bottone = j.azione ? el('button', '', ['Avvia ora']) : null;
-    if (bottone) { bottone.type = 'button'; bottone.addEventListener('click', () => avviaAzione(j.azione)); }
-    return el('div', 'avvio', [
-      el('div', '', [
-        el('div', 'nome', [NOMI_AVVIO[j.nome] || j.nome, el('span', 'pillola ' + (CLASSE_AVVIO[j.stato] || ''), [STATI_AVVIO[j.stato]])]),
-        el('p', 'sub', [j.motivo + '. Previsto ' + quando(j.previsto) + ', ultimo log ' + quando(j.ultimoLog) + ', prossimo ' + quando(j.prossimo) + '.']),
-        j.ultimaRiga ? el('div', 'mono', [j.ultimaRiga]) : '',
-      ]),
-      bottone || '',
-    ]);
-  }));
+  // le righe già aperte restano aperte quando i dati si rinfrescano
+  const aperte = new Set([...document.querySelectorAll('#avvii-contenuto .avvio-apri[aria-expanded="true"]')].map(b => b.querySelector('.nome').textContent));
+  $('avvii-contenuto').replaceChildren(d.job.length
+    ? el('div', 'avvio-tabella', [
+      el('div', 'avvio-intestazione', [el('span', '', ['Job']), el('span', '', ['Stato']), el('span', '', ['Ultimo giro']), el('span', '', ['Prossimo']), el('span', '', [''])]),
+      ...d.job.map((j, i) => {
+        const r = rigaAvvio(j, i);
+        if (aperte.has(NOMI_AVVIO[j.nome] || j.nome)) r.querySelector('.avvio-apri').click();
+        return r;
+      }),
+    ])
+    : Comp.cornice('Nessun job pianificato.'));
 }
 
 // «Aspetta te»: ciò che chiede una decisione adesso. Ogni riga porta alla pagina dove decidere.
 function renderAttesa(a) {
-  $('oggi-fatto').textContent = a.fatto;
-  $('oggi-fatto').style.color = a.conteggi.job ? 'var(--negative)' : 'var(--muted)';
-  $('kpi-bozze').textContent = a.conteggi.bozze;
-  $('kpi-skill').textContent = a.conteggi.skill ?? '–';
   $('aspetta-te-lista').replaceChildren(a.voci.length
     ? el('ul', 'piano-voci', a.voci.map(v => {
       const b = el('button', '', ['Apri']);
@@ -888,7 +1033,9 @@ async function aggiornaAvvii() {
   try {
     const r = await fetch('/api/avvii', { cache: 'no-store' });
     if (!r.ok) throw new Error('HTTP ' + r.status);
-    renderAvvii(await r.json());
+    const d = await r.json();
+    try { esecuzioniLette = await (await fetch('/api/esecuzioni', { cache: 'no-store' })).json(); } catch (e) { /* senza log le righe dicono «nessun log» */ }
+    renderAvvii(d);
     avviso('avvii letti alle ' + new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }), false);
   } catch (e) { avviso('errore nel caricamento: ' + e.message, true); }
 }
@@ -948,11 +1095,27 @@ function schemaServizi(p, misure) {
   const pos = {};
   cols.forEach((c, i) => c.forEach((n, j) => { pos[n] = { x: x(i), y: margine + (H - 2 * margine - (c.length * passo - (passo - alt))) / 2 + j * passo }; }));
   const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Schema dei collegamenti tra i servizi di ' + p.progetto });
+  const etichette = [];
   for (const a of archi) {
     const d = pos[a.da], e = pos[a.a];
     const x1 = d.x + larg, y1 = d.y + alt / 2, x2 = e.x, y2 = e.y + alt / 2, mx = (x1 + x2) / 2;
     svg.append(sv('path', { class: 'arco', d: `M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2} ${y2}` }));
-    const t = sv('text', { class: 'etichetta', x: mx, y: (y1 + y2) / 2 - 6, 'text-anchor': 'middle' }); t.textContent = a.cosa; svg.append(t);
+    etichette.push({ x: mx, y: (y1 + y2) / 2, cosa: a.cosa });
+  }
+  // Le etichette dello stesso tratto non si toccano: ordinate per altezza, ognuna almeno 24px sotto la precedente.
+  const perX = {};
+  for (const t of etichette) (perX[t.x] = perX[t.x] || []).push(t);
+  for (const gruppo of Object.values(perX)) {
+    gruppo.sort((p, q) => p.y - q.y);
+    gruppo.forEach((t, i) => { if (i && t.y < gruppo[i - 1].y + 24) t.y = gruppo[i - 1].y + 24; });
+  }
+  for (const t of etichette) {
+    const testo = t.cosa.length > 24 ? t.cosa.slice(0, 23) + '…' : t.cosa, w = testo.length * 6.8 + 14;
+    const g = sv('g', { class: 'etichetta-arco' });
+    const tip = sv('title'); tip.textContent = t.cosa; g.append(tip);
+    g.append(sv('rect', { class: 'etichetta-fondo', x: t.x - w / 2, y: t.y - 10, width: w, height: 20, rx: 6 }));
+    const tx = sv('text', { class: 'etichetta', x: t.x, y: t.y + 4, 'text-anchor': 'middle' }); tx.textContent = testo; g.append(tx);
+    svg.append(g);
   }
   for (const n of nomi) {
     const riga = p.servizi.find(s => s['Servizio'].toLowerCase().startsWith(n.toLowerCase()));
@@ -968,22 +1131,38 @@ function schemaServizi(p, misure) {
   $('servizi-schema').replaceChildren(svg);
 }
 
-async function aggiornaMisura(p, m) {
+// Chiede il nuovo valore e lo manda al server (una misura per volta: la rotta non ne prende di più).
+// Ritorna 'ok', 'annullata' o 'errore'; con `ricarica` false non rilegge la pagina (lo fa chi chiama).
+async function aggiornaMisura(p, m, ricarica = true) {
   const nuovo = window.prompt('Nuovo valore di «' + m.misura + '» (' + m.unita + '), letto oggi dal pannello di ' + m.servizio + ':', String(m.usato).replace('.', ','));
-  if (nuovo === null || !nuovo.trim()) return;
+  if (nuovo === null || !nuovo.trim()) return 'annullata';
   try {
     const r = await fetch('/api/servizi/misura', { method: 'POST', headers: { 'X-Azione': 'conferma', 'Content-Type': 'application/json' },
       body: JSON.stringify({ progetto: p.progetto, servizio: m.servizio, misura: m.misura, usato: nuovo.trim() }) });
     if (!r.ok) throw new Error(r.status === 400 ? 'serve un numero maggiore o uguale a zero' : 'HTTP ' + r.status);
     avviso('Misura aggiornata: «' + m.misura + '».', false);
-    aggiornaServizi();
-  } catch (e) { avviso('Misura non aggiornata: ' + e.message, true); }
+    if (ricarica) aggiornaServizi();
+    return 'ok';
+  } catch (e) { avviso('Misura non aggiornata: ' + e.message, true); return 'errore'; }
+}
+
+// Le misure vecchie una dopo l'altra, ognuna col suo valore; ci si ferma al primo «Annulla» o errore.
+async function aggiornaVecchie(p, vecchie) {
+  for (const m of vecchie) if (await aggiornaMisura(p, m, false) !== 'ok') break;
+  aggiornaServizi();
 }
 
 function consumiServizi(p, misure) {
   if (!misure.length) { $('servizi-misure').replaceChildren(vuoto('Nessuna misura registrata per questo progetto: i consumi si leggono nei pannelli dei servizi.')); return; }
   const etichette = p.analisi.etichette;
-  $('servizi-misure').replaceChildren(el('ul', 'misure', misure.map(m => {
+  const vecchie = misure.filter(m => m.vecchia);
+  const tutte = el('button', 'primario', ['Aggiorna tutte (' + vecchie.length + ')']);
+  tutte.type = 'button';
+  tutte.addEventListener('click', () => aggiornaVecchie(p, vecchie));
+  const avvisoVecchie = vecchie.length ? [el('div', 'misure-vecchie', [
+    el('span', '', [vecchie.length === 1 ? '1 misura da aggiornare' : vecchie.length + ' misure da aggiornare']),
+    el('span', 'sub', ['lette più di 7 giorni fa, una alla volta']), tutte])] : [];
+  $('servizi-misure').replaceChildren(...avvisoVecchie, el('ul', 'misure', misure.map(m => {
     const riempi = el('span', 'riempi', []);
     riempi.style.width = Math.min(100, m.parte * 100) + '%';
     const nodi = [riempi];
@@ -999,7 +1178,7 @@ function consumiServizi(p, misure) {
     const barra = el('div', 'barra', nodi);
     barra.setAttribute('role', 'img');
     barra.setAttribute('aria-label', m.misura + ': ' + cifra(m.usato, m.unita) + ' di ' + cifra(m.limite, m.unita) + (m.previsto !== null ? ', previsto ' + cifra(Math.round(m.previsto * 10) / 10, m.unita) : ''));
-    const aggiorna = el('button', '', ['Aggiorna']);
+    const aggiorna = el('button', 'link', ['Aggiorna']);
     aggiorna.type = 'button';
     aggiorna.addEventListener('click', () => aggiornaMisura(p, m));
     return el('li', '', [
@@ -1012,7 +1191,7 @@ function consumiServizi(p, misure) {
         el('span', '', [cifra(m.usato) + ' di ' + cifra(m.limite, m.unita) + ' · soglia ' + cifra(m.soglia)]),
         ...(m.previsto !== null ? [el('span', '', [m.motivo + '.'])] : []),
         el('span', 'riga-misura', [
-          'misurato il ' + giorno(m.misurato), m.vecchia ? el('span', 'pillola avviso', ['da aggiornare']) : '', aggiorna,
+          el('span', m.vecchia ? 'vecchia' : '', ['misurato il ' + giorno(m.misurato)]), aggiorna,
         ]),
       ]),
     ]);
@@ -1035,6 +1214,8 @@ function pianiServizi(p) {
 }
 
 function renderServizi(lista) {
+  datiConsumi.servizi = lista;
+  datoConsumi();
   if (!lista.length) { $('servizi-misure').replaceChildren(vuoto('Nessun servizio in docs/servizi.md.')); return; }
   if (!lista.some(p => p.progetto === progettoServizi)) progettoServizi = lista[0].progetto;
   $('servizi-scelta').replaceChildren(...lista.map(p => {
@@ -1049,6 +1230,35 @@ function renderServizi(lista) {
   schemaServizi(p, misure);
   consumiServizi(p, misure);
   pianiServizi(p);
+}
+
+// Consumi: tre schede, una alla volta. Il blocco nascosto dai moduli (hidden) non compare tra le schede.
+const SCHEDE_CONSUMI = [['claude', 'Claude', 'consumi-claude'], ['servizi', 'Servizi', 'consumi-servizi'], ['locale', 'Modello locale', 'consumi-locale']];
+let schedaConsumi = 'claude';
+const datiConsumi = { servizi: null, claude: null };
+const SOGLIA_CLAUDE = 70;  // la stessa soglia d'azione dei servizi senza una propria («si agisce al 70%»)
+
+function schedeConsumi() { return SCHEDE_CONSUMI.filter(([, , blocco]) => !$(blocco).hidden); }
+
+function mostraSchedaConsumi(id) {
+  const voci = schedeConsumi();
+  if (!voci.some(v => v[0] === id)) id = voci.length ? voci[0][0] : id;
+  schedaConsumi = id;
+  for (const [nome, , blocco] of SCHEDE_CONSUMI) $(blocco).classList.toggle('fuori', nome !== id);
+  const gruppo = $('consumi-schede');
+  if (gruppo.children.length !== voci.length) Comp.schede($('consumi-schede'), voci.map(([nome, etichetta]) => ({ id: nome, etichetta })), id, mostraSchedaConsumi, 'Sezioni dei consumi');
+  else for (const b of gruppo.children) { b.setAttribute('aria-pressed', String(b.dataset.id === id)); b.tabIndex = b.dataset.id === id ? 0 : -1; }  // niente ricostruzione: il fuoco resta sul pulsante
+}
+
+// «Tutto nei limiti» o i più vicini al limite: misure dei servizi con verdetto non ok e finestre di Claude sopra la soglia.
+function datoConsumi() {
+  const vicini = [];
+  for (const p of datiConsumi.servizi || []) for (const m of misureDi(p)) if (m.vicino) vicini.push(m.servizio + ' ' + Math.round(m.parte * 100) + '%');
+  for (const f of (datiConsumi.claude || {}).finestre || []) if (!f.inattiva && !f.scaduto && f.percentuale >= SOGLIA_CLAUDE) vicini.push('Claude ' + (f.nome === '5 ore' ? '5 ore' : 'settimana') + ' ' + f.percentuale + '%');
+  const unici = [...new Set(vicini)];
+  const atteso = [['servizi', 'consumi-servizi'], ['claude', 'consumi-claude']].filter(([, b]) => !$(b).hidden);
+  if (!unici.length && atteso.some(([k]) => datiConsumi[k] === null)) { Comp.dato('consumi', 'caricamento…'); return; }
+  Comp.dato('consumi', unici.length ? unici.length + ' vicini al limite: ' + unici.slice(0, 3).join(', ') + (unici.length > 3 ? ' e altri ' + (unici.length - 3) : '') : 'Tutto nei limiti');
 }
 
 async function aggiornaServizi() {
@@ -1274,12 +1484,15 @@ function dettaglioPost(cal, v) {
 const breve = t => { const prima = (t.split(/(?<=[.!?])\s/)[0] || t); return prima.length > 110 ? prima.slice(0, 109) + '…' : prima; };
 function miniaturaPost(v) {
   const i = v.immagini.find(x => x.esiste);
-  if (!i) return el('span', '', []);
+  if (!i) return el('span', 'mini vuota', []);  // segnaposto: la colonna resta, su telefono sparisce
   const m = el('img', 'mini', []); m.src = i.url; m.alt = ''; m.loading = 'lazy';
   return m;
 }
 
 let listaPost = [];
+let passateAperte = false;
+let altreAperte = false;
+const SETTIMANE_VISTE = 4;
 function renderPost(lista) {
   listaPost = lista;
   if (!lista.length) { $('post-agenda').replaceChildren(vuoto('Nessun calendario: aggiungi projects/<progetto>/post-<canale>.json.')); $('post-kpi').replaceChildren(); return; }
@@ -1291,15 +1504,15 @@ function renderPost(lista) {
     return b;
   }));
   const cal = lista.find(c => chiave(c) === calendarioPost);
-  $('post-sub').textContent = (cal.account ? cal.account + ' · ' : '') + 'calendario aggiornato il ' + giorno(cal.aggiornato) + '.';
   $('post-nota').textContent = cal.nota || '';
   const oggi = new Date(); oggi.setHours(0, 0, 0, 0);
   const tra7 = new Date(oggi); tra7.setDate(tra7.getDate() + 7);
   const data = v => new Date(v.data + 'T12:00');
   const prossime = cal.voci.filter(v => data(v) >= oggi && data(v) <= tra7 && v.stato !== 'pubblicato').length;
   const conteggio = st => cal.voci.filter(v => v.stato === st).length;
-  $('post-kpi').replaceChildren(...[[String(cal.voci.length), 'voci in calendario', ''], [String(prossime), 'nei prossimi 7 giorni', 'dato'],
-    [String(conteggio('da creare')), 'da creare', ''], [String(conteggio('da approvare')), 'da approvare', ''], [String(conteggio('pubblicato')), 'pubblicati', '']].map(([v, e, c]) => el('li', '', [el('b', c, [v]), el('span', '', [e])])));
+  Comp.dato('post', conteggio('da approvare') + ' da approvare, ' + prossime + ' nei prossimi 7 giorni' + (cal.account ? ' · ' + cal.account : ''));
+  $('post-kpi').replaceChildren(...[[String(prossime), 'nei prossimi 7 giorni', ''],
+    [String(conteggio('da approvare')), 'da approvare', ''], [String(conteggio('da creare')), 'da creare', '']].map(([v, e, c]) => el('li', '', [el('b', c, [v]), el('span', '', [e])])));
   const tipi = ['tutti', ...new Set(cal.voci.map(v => v.tipo))];
   $('post-filtri').replaceChildren(...tipi.map(t => {
     const b = el('button', '', [t === 'tutti' ? 'Tutti i tipi' : t[0].toUpperCase() + t.slice(1)]); b.type = 'button'; b.setAttribute('aria-pressed', String(t === filtroPost));
@@ -1307,14 +1520,10 @@ function renderPost(lista) {
     return b;
   }));
   const voci = cal.voci.filter(v => filtroPost === 'tutti' || v.tipo === filtroPost).sort((a, b) => (a.data + a.ora).localeCompare(b.data + b.ora));
-  const blocchi = [];
-  let settimana = null;
-  for (const v of voci) {
-    const lun = lunediDi(data(v));
-    if (chiaveGiorno(lun) !== settimana) {
-      settimana = chiaveGiorno(lun);
-      blocchi.push(el('h3', 'settimana', ['Settimana dal ' + lun.toLocaleDateString('it-IT', { day: 'numeric', month: 'long' })]));
-    }
+  // Si apre sulla coda: dalla settimana corrente in poi; settimane passate e pubblicate dietro «Mostra le passate»
+  const lunOggi = lunediDi(oggi);
+  const passata = v => v.stato === 'pubblicato' || lunediDi(data(v)) < lunOggi;
+  const rigaPost = v => {
     const d = data(v);
     const classe = 'voce-post' + (d < oggi ? ' passata' : '') + (d >= oggi && d <= tra7 ? ' vicina' : '') + (d.getTime() === oggi.getTime() ? ' oggi' : '');
     const riga = el('details', classe, [
@@ -1330,7 +1539,36 @@ function renderPost(lista) {
     const id = cal.progetto + '/' + cal.canale + '/' + v.id;
     riga.open = apertePost.has(id);
     riga.addEventListener('toggle', () => { riga.open ? apertePost.add(id) : apertePost.delete(id); });
-    blocchi.push(riga);
+    return riga;
+  };
+  const conSettimane = elenco => {
+    const blocchi = [];
+    let settimana = null;
+    for (const v of elenco) {
+      const lun = lunediDi(data(v));
+      if (chiaveGiorno(lun) !== settimana) {
+        settimana = chiaveGiorno(lun);
+        blocchi.push(el('h3', 'settimana', ['Settimana dal ' + lun.toLocaleDateString('it-IT', { day: 'numeric', month: 'long' })]));
+      }
+      blocchi.push(rigaPost(v));
+    }
+    return blocchi;
+  };
+  const coda = voci.filter(v => !passata(v)), passate = voci.filter(passata);
+  // Le prime settimane in vista, le altre dietro «Mostra altre (N)»
+  const { viste, altre } = Comp.limitaSettimane(coda, v => chiaveGiorno(lunediDi(data(v))), SETTIMANE_VISTE);
+  const blocchi = conSettimane(viste);
+  if (altre.length) {
+    const piu = el('details', 'resto', [el('summary', '', ['Mostra altre (' + altre.length + ')']), ...conSettimane(altre)]);
+    piu.open = altreAperte;
+    piu.addEventListener('toggle', () => { altreAperte = piu.open; });
+    blocchi.push(piu);
+  }
+  if (passate.length) {
+    const resto = el('details', 'resto', [el('summary', '', ['Mostra le passate (' + passate.length + ')']), ...conSettimane(passate)]);
+    resto.open = passateAperte;
+    resto.addEventListener('toggle', () => { passateAperte = resto.open; });
+    blocchi.push(resto);
   }
   $('post-agenda').replaceChildren(el('section', '', blocchi.length ? blocchi : [vuoto('Nessuna voce per questo filtro.')]));
   renderRichieste(cal);
@@ -1344,7 +1582,7 @@ function mostraSchedaPost(scheda) {
   $('post-bozze').hidden = scheda !== 'bozze';
   for (const b of $('post-schede').children) b.setAttribute('aria-pressed', String(b.dataset.scheda === scheda));
   $('chiedi-post').hidden = scheda !== 'calendario';
-  if (scheda === 'bozze') { $('post-sub').textContent = 'Post preparati dal sistema, da rileggere, copiare e pubblicare tu.'; aggiornaBozze(); }
+  if (scheda === 'bozze') { Comp.dato('post', 'Post preparati dal sistema, da rileggere, copiare e pubblicare tu.'); aggiornaBozze(); }
   else if (listaPost.length) renderPost(listaPost);
 }
 for (const b of $('post-schede').children) b.addEventListener('click', () => mostraSchedaPost(b.dataset.scheda));
@@ -1372,14 +1610,14 @@ const blocco = id => !$(id).hidden;  // un blocco di Consumi nascosto dai moduli
 const CARICA = {
   mappa: () => { aggiorna(); window.Mappa && window.Mappa.carica(); },
   agenda: aggiorna, radar: aggiorna, post: aggiornaPost,
-  consumi: () => Promise.all([blocco('consumi-servizi') && aggiornaServizi(), aggiornaPrestazioni(), aggiorna()]),
+  consumi: () => { mostraSchedaConsumi(schedaConsumi); return Promise.all([blocco('consumi-servizi') && aggiornaServizi(), aggiornaPrestazioni(), aggiorna()]); },
   avvii: () => { aggiornaAvvii(); aggiorna(); },
   configurazione: aggiornaConfigurazione,
 };
 const TITOLI = { mappa: 'Mappa', agenda: 'Agenda', radar: 'Radar', post: 'Post', consumi: 'Consumi', avvii: 'Avvii', configurazione: 'Configurazione' };
 // Gli indirizzi delle pagine che non ci sono più portano alla pagina che le ha assorbite (e, per Consumi, alla sua sezione).
 const ALIAS = { oggi: 'mappa', piano: 'mappa', progetti: 'mappa', bozze: 'post', servizi: 'consumi', claude: 'consumi', prestazioni: 'consumi' };
-const SEZIONE = { servizi: 'consumi-servizi', claude: 'consumi-claude', prestazioni: 'consumi-locale' };
+const SEZIONE = { servizi: 'servizi', claude: 'claude', prestazioni: 'locale' };
 let vista = 'mappa';
 
 // Le pagine dei moduli non scelti in setup.py non compaiono (/api/moduli); senza risposta si mostra tutto.
@@ -1395,7 +1633,7 @@ function etichettaModello() {
 }
 async function caricaModuli() {
   try { MODULI = await (await fetch('/api/moduli')).json(); } catch (e) { MODULI = null; }
-  $('assistente-modello').textContent = etichettaModello() + ', risponde in sola lettura';
+  $('assistente-domanda').title = etichettaModello() + ', risponde in sola lettura';
   const voci = [...document.querySelectorAll('.schede > *')];
   for (const b of document.querySelectorAll('[data-modulo]')) {  // voci del menu e sezioni di Consumi
     b.hidden = !!(MODULI && !b.dataset.modulo.split(' ').some(m => MODULI[m]));
@@ -1409,7 +1647,7 @@ async function caricaModuli() {
 }
 
 function mostra(nuova) {
-  const sezione = SEZIONE[nuova];
+  if (SEZIONE[nuova]) schedaConsumi = SEZIONE[nuova];  // l'hash vecchio apre la scheda giusta di Consumi
   nuova = ALIAS[nuova] || nuova;
   if (!CARICA[nuova] || !ammessa(nuova)) nuova = 'mappa';
   vista = nuova;
@@ -1422,8 +1660,7 @@ function mostra(nuova) {
   $('rail').classList.remove('aperto');
   $('menu').setAttribute('aria-expanded', 'false');
   try { history.replaceState(null, '', nuova === 'mappa' ? '#' : '#' + nuova); } catch (e) { /* hash opzionale */ }
-  // scorre alla sezione quando i dati sono arrivati: prima la pagina è più corta
-  Promise.resolve(CARICA[nuova]()).then(() => { if (sezione && !$(sezione).hidden) $(sezione).scrollIntoView(); });
+  CARICA[nuova]();
 }
 
 for (const b of document.querySelectorAll('.schede button')) {
@@ -1436,9 +1673,6 @@ $('menu').addEventListener('click', () => {
   const aperto = $('rail').classList.toggle('aperto');
   $('menu').setAttribute('aria-expanded', String(aperto));
 });
-
-// Su telefono Chiedi parte chiuso: la prima cosa da vedere è «Aspetta te».
-if (!matchMedia('(min-width: 701px)').matches) document.querySelector('#assistente .chiedi').open = false;
 
 // Tema: segue il sistema finché non lo scegli; la scelta resta in localStorage.
 const temaAttuale = () => document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');

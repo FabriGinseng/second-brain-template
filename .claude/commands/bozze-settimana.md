@@ -10,6 +10,8 @@ Prepara le bozze di post della settimana. Scrivi in italiano, in prima persona, 
 
 **Scegli 3 temi diversi** tra loro (una decisione presa, una cosa costruita, una cosa imparata). Per ogni tema crea due file nuovi con lo stesso nome `YYYY-MM-DD-<tema>.md`, con la data di oggi: uno in `content/linkedin/`, uno in `content/instagram/`.
 
+**Progetto.** Se la bozza parla di un progetto di `projects/INDEX.md` (mai uno del lavoro), scrivi subito sotto il titolo la riga `Progetto: <nome>`, con il nome esatto dell'INDEX. La dashboard la usa per mostrare la bozza anche sul nodo di quel progetto. Se non riguarda un progetto, niente riga.
+
 **LinkedIn.** Titolo `# Bozza LinkedIn: ...`. Apertura forte nelle prime due righe, una storia con un punto preciso, una conclusione utile, una domanda finale alla community, al massimo tre hashtag. Testo da 900 a 1.300 caratteri circa.
 
 **Instagram.** Titolo `# Bozza Instagram: ...`. Didascalia corta (al massimo 600 caratteri), l'idea da mostrare in un carosello di 4-6 immagini elencate una per riga, al massimo tre hashtag. Nessun link nella didascalia.

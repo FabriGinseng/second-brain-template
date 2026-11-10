@@ -39,8 +39,19 @@
     return b;
   }
   const K_MIN = 0.6, K_MAX = 3;       // oltre questi limiti le etichette si toccano o i nodi escono dal riquadro
-  const aperti = n => n.task.filter(t => t.stato !== 'fatto').length;
+  // Le bozze con «Progetto:» stanno anche sul nodo del progetto come satelliti, ma il suo numero resta quello del piano.
+  const aperti = n => n.task.filter(t => t.stato !== 'fatto' && (n.nome === 'Social' || !t.bozza)).length;
   const puoAggiungere = n => n.haCartella && n.tipo !== 'senza' && /^[A-Za-z][\p{L}\p{N}_-]*$/u.test(n.nome);   // il nome del nodo è il tag: deve essere un tag valido
+  // Cosa dice il numero sul nodo, a parole: lo stesso testo va nel tooltip, nell'etichetta per i lettori di schermo, nel pannello e nella lista.
+  // Social conta bozze (content/), gli altri nodi task di piano.md.
+  function contoAperti(n) {
+    const k = aperti(n);
+    if (n.nome === 'Social') return k ? k + (k === 1 ? ' bozza da pubblicare' : ' bozze da pubblicare') : 'nessuna bozza da pubblicare';
+    const b = n.task.filter(t => t.bozza && t.stato !== 'fatto').length, nelPiano = n.task.length - n.task.filter(t => t.bozza).length;
+    const bozze = b ? ' · ' + b + (b === 1 ? ' bozza da pubblicare' : ' bozze da pubblicare') : '';
+    if (k) return k + (k === 1 ? ' task aperto' : ' task aperti') + bozze;
+    return (nelPiano ? 'nessun task aperto' : 'nessun task nel piano con questo tag') + bozze;
+  }
   const haPiu = n => aperti(n) === 0 && puoAggiungere(n);   // nodo senza task da fare: un «+» per scriverne uno
   // Il «+» sta due volte: sul nodo, e sopra la zona dei satelliti quando il nodo è aperto (la zona copre il bordo del disco).
   function piu(n, p) {
@@ -92,7 +103,7 @@
     const g = ora.getHours();
     const parola = g < 13 ? 'Buongiorno' : g < 18 ? 'Buon pomeriggio' : 'Buonasera';
     const p = dati && dati.prossima;
-    const h1 = h('h1', 'saluto', [parola + '. ' + (p ? 'Prossimo: ' + brevePerSaluto(p.vista) + '.' : 'Niente di aperto.')]);
+    const h1 = h('h1', 'saluto', [parola + (dati && dati.nome ? ', ' + dati.nome : '') + '. ' + (p ? 'Prossimo: ' + brevePerSaluto(p.vista) + '.' : 'Niente di aperto.')]);
     const c = dati ? dati.conteggi : { da_fare: 0, in_corso: 0, in_ritardo: 0 };
     const punto = (cl, n, testo) => h('span', 'conteggio', [h('i', 'punto ' + cl), h('b', '', [String(n)]), ' ' + testo]);
     $('mappa-saluto').replaceChildren(h1, h('p', 'saluto-sub', [
@@ -230,8 +241,8 @@
     for (const o of layout(visibili(), W, H)) {
       const { n, x, y, r } = o;
       pos.set(n.nome, { x, y, r });
-      const G = s('g', { class: 'nodo' + (n.nome === prossimo ? ' prossimo' : ''), tabindex: 0, role: 'button', 'aria-label': n.nome + ', ' + aperti(n) + ' aperti' });
-      G.append(s('circle', { class: 'alone', cx: x, cy: y, r: r + 9 }), s('circle', { class: 'disco', cx: x, cy: y, r }));
+      const G = s('g', { class: 'nodo' + (n.nome === prossimo ? ' prossimo' : ''), tabindex: 0, role: 'button', 'aria-label': n.nome + ', ' + contoAperti(n) });
+      G.append(s('title', {}, [n.nome + ': ' + contoAperti(n)]), s('circle', { class: 'alone', cx: x, cy: y, r: r + 9 }), s('circle', { class: 'disco', cx: x, cy: y, r }));
       const tot = n.task.length;
       if (tot) {
         let a0 = -Math.PI / 2;
@@ -356,7 +367,7 @@
     ul.replaceChildren(...visibili().map(n => {
       const ts = filtro === 'aperti' ? n.task.filter(t => t.stato !== 'fatto') : n.task;
       return h('li', '', [
-        h('h3', '', [n.nome, h('span', 'tipo-nodo', [n.tipo === 'senza' ? 'da etichettare' : n.tipo]), h('span', 'sub', [aperti(n) + ' aperti'])]),
+        h('h3', '', [n.nome, h('span', 'tipo-nodo', [n.tipo === 'senza' ? 'da etichettare' : n.tipo]), h('span', 'sub', [contoAperti(n)])]),
         ts.length ? h('ul', '', ts.map(t => h('li', 'task-lista st-' + t.stato, [
           h('i', 'punto st-' + t.stato), bottone(t.vista, 'link' + (t.ritardo ? ' ritardo' : ''), () => { scegliTask(n.nome, t); $('mappa-dettaglio').scrollIntoView({ block: 'nearest' }); }),
           h('span', 'sub', [NOME_STATO[t.stato] + (t.data ? ' · ' + giornoBreve(t.data) : '')]),
@@ -373,11 +384,12 @@
       return b;
     }));
   }
+  const apriPost = () => { const b = document.querySelector('.schede button[data-vista="post"]'); if (b) b.click(); };   // le bozze si decidono in Post, non da qui
   function rigaTask(n, t) {
     const sel = selezione && selezione.testo === t.testo && selezione.data === t.data;
     const li = h('li', 'task' + (sel ? ' scelto' : ''), [
       h('span', 'task-testo' + (t.ritardo ? ' ritardo' : ''), [h('i', 'punto st-' + t.stato), t.vista, t.data ? h('span', 'sub', [' ' + (t.ritardo ? 'dal ' : '') + giornoBreve(t.data)]) : null]),
-      h('span', 'riga-azioni', [selettore(n, t), n.haCartella && t.stato !== 'fatto' ? bottone(t.stato === 'in_corso' ? 'Riavvia' : 'Avvia', '', () => conferma(n, t)) : null]),
+      h('span', 'riga-azioni', t.bozza ? [bottone('Apri in Post', '', apriPost)] : [selettore(n, t), n.haCartella && t.stato !== 'fatto' ? bottone(t.stato === 'in_corso' ? 'Riavvia' : 'Avvia', '', () => conferma(n, t)) : null]),
     ]);
     if (sel) li.setAttribute('aria-current', 'true');
     return li;
@@ -385,12 +397,13 @@
   function dettaglioNodo(n) {
     const p = n.tipo === 'progetto' ? progetti.find(x => x.nome.toLowerCase() === n.nome.toLowerCase()) : null;
     const c = p && p.attivita && p.attivita.commit && p.attivita.commit[0];
-    const da = n.task.find(t => t.stato === 'in_corso') || n.task.find(t => t.stato === 'da_fare');   // «Avvia» parte dal passo già in corso, poi dal primo da fare
+    const avviabili = n.task.filter(t => !t.bozza), da = avviabili.find(t => t.stato === 'in_corso') || avviabili.find(t => t.stato === 'da_fare');   // «Avvia» parte dal passo già in corso, poi dal primo da fare
     return [
       h('h2', '', [n.nome, h('span', 'sub', [n.tipo === 'senza' ? 'da etichettare' : n.tipo + (n.priorita ? ' · priorità ' + n.priorita : '')])]),
+      n.task.length ? h('p', 'sub conto-nodo', [contoAperti(n)]) : null,   // con zero task lo dice già il paragrafo vuoto sotto
       p && p.doveSono ? h('p', 'dove-sono', [h('b', '', ['Dove sono ']), taglia(p.doveSono, 260)]) : null,
       c ? h('p', 'sub', ['Ultimo commit: ' + taglia(c.messaggio, 80) + (c.ramo ? ' (' + c.ramo + ')' : '')]) : null,
-      n.task.length ? h('ul', 'task-elenco', n.task.map(t => rigaTask(n, t))) : h('p', 'vuoto', ['Nessun passo scritto in piano.md.']),
+      n.task.length ? h('ul', 'task-elenco', n.task.map(t => rigaTask(n, t))) : h('p', 'vuoto', [n.nome === 'Social' ? 'Nessuna bozza da pubblicare.' : 'Nessun task nel piano con questo tag.']),
       h('div', 'riga-azioni', [
         da && n.haCartella ? bottone(da.stato === 'in_corso' ? 'Riavvia in Claude' : 'Avvia in Claude', 'primario', () => conferma(n, da)) : null,
         puoAggiungere(n) ? bottone('Aggiungi un task', '', () => nuovoTask(n)) : null,
@@ -549,7 +562,7 @@
     $('mappa-area').replaceChildren(h('div', 'mappa-box', [
       h('div', 'mappa-testa', [h('h2', '', ['Mappa del lavoro']), filtri]), svg, legenda, zoom,
       h('ul', 'mappa-lista', [], { id: 'mappa-lista', 'aria-label': 'Nodi e task, in elenco' }),
-    ]));
+    ]), h('p', 'nota-mappa', ['Il numero sul nodo = task aperti nel piano. Social: bozze da pubblicare.']));
     new ResizeObserver(() => {
       const q = svg.clientWidth + 'x' + svg.clientHeight;
       if (dati && q !== dimensione) disegna();
@@ -594,5 +607,19 @@
   });
   document.addEventListener('visibilitychange', () => { if (!document.hidden && !$('mappa-vista').hidden) carica(); });
 
-  window.Mappa = { carica, imposta };
+  // Dall'Agenda: stesso dialogo di conferma, per una voce del piano con #tag (il nodo è il tag).
+  // Il nodo si cerca nei dati della mappa (case-insensitive: il tag è minuscolo); se non sono ancora arrivati li carica, una volta sola.
+  let caricamento = null;
+  async function nodoDi(tag) {
+    if (!dati) await (caricamento = caricamento || carica().finally(() => { caricamento = null; }));
+    return dati && dati.nodi.find(n => n.nome.toLowerCase() === String(tag).toLowerCase());
+  }
+  async function avviaVoce(v) {
+    const { testo, tag } = window.Comp.senzaTag(v.titolo || v.testo);
+    const n = await nodoDi(tag);
+    if (!n) return toast('Nodo «' + tag + '» non trovato.');
+    conferma(n, { data: v.data, testo: v.testo, vista: testo });
+  }
+
+  window.Mappa = { carica, imposta, avviaVoce, nodoDi };
 })();
