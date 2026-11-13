@@ -110,5 +110,29 @@ class Radar(unittest.TestCase):
                          ["scripts/radar-stadio1.py", "scripts/radar-stadio2.py", "scripts/radar-output.py"])
 
 
+    def test_con_claude_raccoglie_sempre_e_lancia_un_solo_passo(self):
+        (self.v / "config.json").write_text(json.dumps({"modelli": {"radar_giudizio": "claude:haiku"}}), encoding="utf-8")
+        (self.v / "memory").mkdir()
+        (self.v / "memory" / "feeds.md").write_text("https://esempio.it/feed\n")
+        self.file("inbox/2026-11-09-novita.md", 100)
+        radar.radar(self.v, self.lancia, date(2026, 11, 11))  # mercoledì: con n8n l'inbox di lunedì basterebbe
+        self.assertEqual(self.chiamate, [("scripts/feed.py",), ("scripts/radar-claude.py", "inbox/2026-11-09-novita.md")])
+
+    def test_con_claude_una_scheda_piu_recente_dell_inbox_salta(self):
+        (self.v / "config.json").write_text(json.dumps({"modelli": {"radar_giudizio": "claude"}}), encoding="utf-8")
+        self.file("inbox/2026-11-09-novita.md", 100)
+        self.file("radar/2026-11-09.md", 200)
+        radar.radar(self.v, self.lancia, date(2026, 11, 11))
+        self.assertEqual(self.chiamate, [])
+
+    def test_con_claude_e_n8n_la_raccolta_resta_a_n8n(self):
+        (self.v / "config.json").write_text(json.dumps({"modelli": {"radar_giudizio": "claude"}, "moduli": {"radar": {"automazione": "n8n"}}}), encoding="utf-8")
+        (self.v / "memory").mkdir()
+        (self.v / "memory" / "feeds.md").write_text("https://esempio.it/feed\n")
+        self.file("inbox/2026-11-09-novita.md", 100)
+        radar.radar(self.v, self.lancia, date(2026, 11, 11))
+        self.assertEqual(self.chiamate, [("scripts/radar-claude.py", "inbox/2026-11-09-novita.md")])
+
+
 if __name__ == "__main__":
     unittest.main()

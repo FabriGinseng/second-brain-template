@@ -55,7 +55,7 @@ function confermaPiano(n, riga) {
   const d = el('dialog', 'dialogo-piano', []);
   d.setAttribute('aria-label', 'Aggiungi al piano');
   const campo = el('input', '', []);
-  campo.type = 'text'; campo.maxLength = 200; campo.value = ('Leggere: ' + n.titolo).slice(0, 200);
+  campo.type = 'text'; campo.maxLength = 200; campo.value = (n.progetti && n.progetti.length && n.azione ? '#' + n.progetti[0] + ' ' + n.azione : 'Leggere: ' + n.titolo).slice(0, 200);
   campo.id = 'piano-testo';
   const esito = el('p', 'sub esito-piano', []);
   esito.setAttribute('aria-live', 'polite');
@@ -92,8 +92,19 @@ function confermaPiano(n, riga) {
   campo.select();
 }
 
+function votoScheda(n, testo, giudizio) {
+  const b = el('button', 'voto', [testo]);
+  b.type = 'button';
+  b.setAttribute('aria-pressed', String(n.giudizio === giudizio));
+  b.onclick = () => vota(n.titolo, giudizio);
+  return b;
+}
+
+const TIPI_SCHEDA = { sicurezza: 'Sicurezza', skill: 'Skill', progetto: 'Progetto' };
+
+// Una scheda del radar: titolo, progetti, tipo e, se il radar è quello in un solo passo, cos'è / cosa farci / costo.
 function rigaNovita(n) {
-  const azioni = el('div', 'azioni', []);
+  const azioni = el('div', 'azioni', [votoScheda(n, 'Utile', 'utile'), votoScheda(n, 'Non utile', 'non-utile')]);
   if (nelPiano.has(n.titolo)) azioni.appendChild(Comp.stato('Nel piano', 'ok'));
   else {
     const b = el('button', '', ['Aggiungi al piano']);
@@ -101,7 +112,14 @@ function rigaNovita(n) {
     azioni.appendChild(b);
     b.addEventListener('click', () => confermaPiano(n, riga));
   }
-  const riga = el('li', 'riga-lista riga-novita', [el('span', 'titolo-riga', [titoloNovita(n)]), azioni]);
+  const testa = [titoloNovita(n)];
+  if (n.tipo) testa.push(' ', Comp.stato(TIPI_SCHEDA[n.tipo] || n.tipo, n.tipo === 'sicurezza' ? 'attenzione' : 'neutro'));
+  const dettagli = [];
+  if (n.progetti && n.progetti.length) dettagli.push(el('p', 'sub', ['Per: ' + n.progetti.join(', ')]));
+  for (const [k, etichetta] of [['cosa', 'Cos\'è'], ['azione', 'Cosa farci'], ['costo', 'Costo per provarlo']]) {
+    if (n[k]) dettagli.push(el('p', 'sub', [etichetta + ': ' + n[k]]));
+  }
+  const riga = el('li', 'riga-lista riga-novita', [el('span', 'titolo-riga', testa.concat(dettagli)), azioni]);
   return riga;
 }
 
@@ -122,10 +140,13 @@ function renderRadar(radar, inbox, prossimo) {
   const lettura = el('section', '', [el('h2', '', ['Da leggere']),
     daLeggere ? el('ul', 'elenco-agenda', radar.daLeggere.map(rigaNovita))
       : Comp.cornice('Nessuna novità da leggere' + (prossimoTesto ? '. Prossimo radar: ' + prossimoTesto : '') + '.')]);
-  const stadi = [(ricevute === null ? null : ricevute + ' ricevute'), (daLeggere + scartate) + ' dopo lo stadio 1', daLeggere + ' dopo lo stadio 2'].filter(Boolean);
+  const unPasso = radar.daLeggere.some(c => c.tipo);  // radar in un solo passo con Claude: niente stadi né scartate
+  const stadi = unPasso
+    ? [(ricevute === null ? null : ricevute + ' ricevute'), daLeggere + ' schede', radar.utili + ' utili e ' + radar.nonUtili + ' non utili votate'].filter(Boolean)
+    : [(ricevute === null ? null : ricevute + ' ricevute'), (daLeggere + scartate) + ' dopo lo stadio 1', daLeggere + ' dopo lo stadio 2'].filter(Boolean);
   const imbuto = el('details', 'resto', [
-    el('summary', '', ['Come ha filtrato: ' + stadi.join(' → ')]),
-    el('p', 'sub', ['Report del ' + giorno(radar.data) + '. Lo stadio 1 tiene le novità simili ai progetti (soglia 0,5); lo stadio 2 è il giudizio del modello locale.' + (ricevute === null ? ' Il numero delle ricevute non è disponibile.' : '')]),
+    el('summary', '', [(unPasso ? 'Come è andata: ' : 'Come ha filtrato: ') + stadi.join(' → ')]),
+    el('p', 'sub', ['Report del ' + giorno(radar.data) + (unPasso ? '. Claude ha letto titolo e riassunto di ogni novità e ha scelto le schede per i tuoi progetti. I voti servono a tarare il radar.' : '. Lo stadio 1 tiene le novità simili ai progetti (soglia 0,5); lo stadio 2 è il giudizio del modello locale.') + (ricevute === null ? ' Il numero delle ricevute non è disponibile.' : '')]),
   ]);
   const vecchie = nodo.querySelector('details.scartate-lista');
   const tabella = el('table', 'scartate', [
@@ -142,7 +163,7 @@ function renderRadar(radar, inbox, prossimo) {
     scartate ? el('div', '', [tabella]) : Comp.cornice('Nessuna novità scartata dallo stadio 2.'),
   ]);
   if (vecchie && vecchie.open) sezScartate.open = true;  // un voto non richiude la lista
-  nodo.replaceChildren(lettura, imbuto, sezScartate);
+  nodo.replaceChildren(...(unPasso ? [lettura, imbuto] : [lettura, imbuto, sezScartate]));
 }
 
 function renderSistema(s) {
