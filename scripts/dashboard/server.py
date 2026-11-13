@@ -60,7 +60,10 @@ VOCE_INBOX = re.compile(r"^- \[([^\]]+)\]\(([^)]+)\)")
 SEZIONE = re.compile(r"^## (.+)$")
 SCARTATA = re.compile(r"^- (.+) \(score ([\d.]+), ([^)]*)\): (.*)$")
 LINK_NOVITA = re.compile(r"^\[(.+)\]\((https?://[^)\s]+)\)$")  # "### [Titolo](https://...)": solo http e https, mai javascript:
-GIUDIZI = {"falso-scarto", "scarto-giusto"}
+GIUDIZI = {"falso-scarto", "scarto-giusto"}  # voti sulle scartate
+GIUDIZI_SCHEDA = {"utile", "non-utile"}  # voti sulle schede da leggere (radar in un solo passo)
+CAMPO_SCHEDA = re.compile(r"^- \*\*(Progetti|Tipo|Cos'è|Cosa farci|Costo per provarlo):\*\* (.*)$")
+PROGETTO_SCHEDA = re.compile(r"\[\[projects/([^/\\|\]]+)/STATE")
 BLOCCO_FEEDBACK = threading.Lock()
 
 
@@ -248,6 +251,12 @@ def radar(cartella=None, feedback=None):
         if sezione == "Da leggere" and riga.startswith("### "):
             m = LINK_NOVITA.match(riga[4:].strip())
             da_leggere.append({"titolo": m.group(1), "link": m.group(2)} if m else {"titolo": riga[4:], "link": None})
+        elif sezione == "Da leggere" and da_leggere and CAMPO_SCHEDA.match(riga):
+            campo, valore = CAMPO_SCHEDA.match(riga).groups()
+            if campo == "Progetti":
+                da_leggere[-1]["progetti"] = PROGETTO_SCHEDA.findall(valore)
+            else:
+                da_leggere[-1][{"Tipo": "tipo", "Cos'è": "cosa", "Cosa farci": "azione", "Costo per provarlo": "costo"}[campo]] = valore
         elif sezione and sezione.startswith("Scartate") and riga.startswith("- "):
             m = SCARTATA.match(riga)
             scartate.append(
@@ -255,22 +264,28 @@ def radar(cartella=None, feedback=None):
                 if m else {"titolo": riga[2:], "score": None, "progetto": None, "motivo": None}
             )
     giudizi = voti(feedback)
-    for c in scartate:
+    for c in scartate + da_leggere:
         c["giudizio"] = giudizi.get(c["titolo"])
+    dei_scartati = [g for g in giudizi.values() if g in GIUDIZI]
     return {
         "data": file[0].stem, "daLeggere": da_leggere, "scartate": scartate,
-        "valutate": len(giudizi), "falsiScarti": sum(1 for g in giudizi.values() if g == "falso-scarto"),
+        "valutate": len(dei_scartati), "falsiScarti": sum(1 for g in dei_scartati if g == "falso-scarto"),
+        "utili": sum(1 for c in da_leggere if c["giudizio"] == "utile"), "nonUtili": sum(1 for c in da_leggere if c["giudizio"] == "non-utile"),
     }
 
 
 def vota_scartata(titolo, giudizio, cartella=None, feedback=None):
-    """Registra il voto su una scartata dell'ultimo report: ValueError se il giudizio non è valido, LookupError se il titolo non c'è."""
-    if giudizio not in GIUDIZI:
+    """Registra il voto su una novità dell'ultimo report: falso-scarto o scarto-giusto su una scartata, utile o non-utile su una scheda da leggere.
+    ValueError se il giudizio non è valido, LookupError se il titolo non c'è (o non è del tipo giusto per quel giudizio)."""
+    if giudizio not in GIUDIZI | GIUDIZI_SCHEDA:
         raise ValueError(giudizio)
     r = radar(cartella, feedback)
-    scartata = next((c for c in (r["scartate"] if r else []) if c["titolo"] == titolo), None)
+    elenco = (r["scartate"] if giudizio in GIUDIZI else r["daLeggere"]) if r else []
+    scartata = next((c for c in elenco if c["titolo"] == titolo), None)
     if scartata is None:
         raise LookupError(titolo)
+    scartata = {"score": scartata.get("score"), "progetto": scartata.get("progetto") or ", ".join(scartata.get("progetti", [])) or None,
+                "motivo": scartata.get("motivo") or scartata.get("cosa")}
     riga = {
         "data": datetime.now().isoformat(timespec="seconds"), "titolo": titolo, "score": scartata["score"],
         "progetto": scartata["progetto"], "motivo": scartata["motivo"], "giudizio": giudizio,
