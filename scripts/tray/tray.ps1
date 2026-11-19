@@ -10,6 +10,8 @@ Security notes:
 - Every task name and command comes from the fixed lists below; nothing read from the system, the network or the
   menu is ever used to build a task name or a command. Names read back from Task Scheduler only end up in balloon text.
 - The health check talks only to 127.0.0.1:8765, with the system proxy disabled.
+- "Avvia / riavvia" stops a process only when it listens on 127.0.0.1:8765 and its command line names the server.py of
+  this vault. The PID read from netstat goes to Get-CimInstance and Stop-Process as an [int], never into a command line.
 
 This file is ASCII only on purpose: PowerShell 5.1 reads a file without a BOM in the ANSI code page.
 
@@ -24,9 +26,13 @@ Set-StrictMode -Version 2
 $ErrorActionPreference = 'Stop'
 
 $Prefix = 'second-brain'
-$DashboardUrl = 'http://127.0.0.1:8765/'
+# PORTA of server.py: jobs.json passes no other port and config.json has none.
+$DashboardPort = 8765
+$DashboardUrl = "http://127.0.0.1:$DashboardPort/"
 # Cheapest GET of the dashboard: it reads config.json only. The Host header (127.0.0.1:8765) is the one the server allows.
-$HealthUrl = 'http://127.0.0.1:8765/api/moduli'
+$HealthUrl = "http://127.0.0.1:$DashboardPort/api/moduli"
+# The server.py of this vault: "Avvia / riavvia" stops a process on the dashboard port only if its command line names it.
+$ServerScript = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\dashboard\server.py'))
 $HealthTimeoutMs = 3000
 $PollSeconds = 30
 # Fixed allowlist of the "Avvia job" menu: each entry is run in order (feed first, then radar once feed has ended).
@@ -106,6 +112,44 @@ function Invoke-Schtasks($ArgList) {
 
 function Get-GroupLabel($Group) { return ($Group -join ' + ') }
 
+# The two OS reads of the dashboard port, behind small functions like Invoke-Schtasks: the tests replace them.
+function Get-TcpTable { return @(& netstat.exe -ano -p TCP) }
+function Get-ProcessCommandLine([int]$Id) {
+    $process = Get-CimInstance Win32_Process -Filter "ProcessId = $Id" -ErrorAction SilentlyContinue
+    if ($null -eq $process) { return $null }
+    return [string]$process.CommandLine
+}
+
+function Get-DashboardListeners {
+    # PIDs listening on 127.0.0.1:<port>. netstat, not Get-NetTCPConnection: with two servers on the port
+    # Get-NetTCPConnection lists only one. A listening row has remote 0.0.0.0:0; the state word is translated
+    # (and can hold a space), so it is never read and the PID is the last field.
+    $local = "127.0.0.1:$DashboardPort"
+    $ids = @()
+    foreach ($line in Get-TcpTable) {
+        $fields = @(([string]$line).Trim() -split '\s+')
+        if ($fields.Count -lt 5 -or $fields[0] -ne 'TCP' -or $fields[1] -ne $local -or $fields[2] -ne '0.0.0.0:0') { continue }
+        $id = 0
+        if ([int]::TryParse($fields[$fields.Count - 1], [ref]$id) -and $id -gt 0 -and $ids -notcontains $id) { $ids += $id }
+    }
+    return $ids
+}
+
+function Test-OurServer([int]$Id) {
+    # Identity check before any stop: the command line must name the server.py of this vault. A command line that
+    # cannot be read (another user's or an elevated process) counts as another program.
+    $line = Get-ProcessCommandLine $Id
+    if (-not $line) { return $false }
+    return $line.Replace('/', '\').IndexOf($ServerScript, [StringComparison]::OrdinalIgnoreCase) -ge 0
+}
+
+function Format-Listeners($Ids) {
+    if (@($Ids).Count -eq 0) { return 'free' }
+    return (@($Ids | ForEach-Object {
+        if (Test-OurServer $_) { "PID $_ (this vault's server.py)" } else { "PID $_ (another program)" }
+    }) -join ', ')
+}
+
 function New-DotIcon([System.Drawing.Color]$Color) {
     # Drawn in code: no binary asset in the repo.
     $bitmap = New-Object System.Drawing.Bitmap 32, 32
@@ -136,7 +180,9 @@ if ($SelfTest) {
     $green.Dispose(); $red.Dispose()
     Write-Output 'menu Dashboard:'
     Write-Output ("  Apri dashboard -> default browser $DashboardUrl")
-    Write-Output ("  Avvia / riavvia -> " + (Format-Command (Get-EndArgs 'dashboard')) + ' ; ' + (Format-Command (Get-RunArgs 'dashboard')))
+    Write-Output ("  Avvia / riavvia -> " + (Format-Command (Get-EndArgs 'dashboard')) +
+        " ; stop what listens on 127.0.0.1:$DashboardPort if its command line has $ServerScript ; " + (Format-Command (Get-RunArgs 'dashboard')))
+    Write-Output ("    now on port ${DashboardPort}: " + (Format-Listeners @(Get-DashboardListeners)))
     Write-Output ("  Ferma (riparte entro 10 min) -> " + (Format-Command (Get-EndArgs 'dashboard')))
     $registered = Get-RegisteredJobs
     Write-Output 'menu Avvia job:'
@@ -243,6 +289,32 @@ function Start-NextInChain {
     }
 }
 
+function Restart-Dashboard {
+    [void](Invoke-Schtasks (Get-EndArgs 'dashboard'))   # fails harmlessly when it is not running
+    # /end ends only conhost.exe, the root of the task: cmd.exe and server.py outlive it and keep the port. Python
+    # sets SO_REUSEADDR, so on Windows a new server.py binds next to the old one, which goes on answering.
+    # Everything on the port is checked first: if a program that is not ours holds it, nothing is stopped or started.
+    $listeners = @(Get-DashboardListeners)
+    $foreign = @($listeners | Where-Object { -not (Test-OurServer $_) })
+    if ($foreign.Count -gt 0) {
+        Write-TrayLog ("port $DashboardPort held by another program (PID " + ($foreign -join ', ') + '): dashboard not started')
+        Show-Balloon ("La porta $DashboardPort e' occupata da un altro programma (PID " + ($foreign -join ', ') + '): non lo chiudo e non avvio la dashboard.') ([System.Windows.Forms.ToolTipIcon]::Warning) -Always
+        return
+    }
+    if ($listeners.Count -gt 0) {
+        foreach ($id in $listeners) {
+            Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
+            Wait-Process -Id $id -Timeout 5 -ErrorAction SilentlyContinue   # the port is free only once it has exited
+            Write-TrayLog "stopped server.py PID $id left on port $DashboardPort"
+        }
+        if (@(Get-DashboardListeners).Count -gt 0) {
+            Show-Balloon "Non riesco a fermare il server rimasto sulla porta ${DashboardPort}: dashboard non riavviata." ([System.Windows.Forms.ToolTipIcon]::Error) -Always
+            return
+        }
+    }
+    if (Start-SecondBrainTask 'dashboard') { Show-Balloon 'Dashboard avviata: l''icona diventa verde quando risponde.' -Always }
+}
+
 function Invoke-Safely([scriptblock]$Body) {
     # An exception escaping a WinForms handler would end Application.Run: log it and keep the tray alive.
     try { & $Body } catch { Write-TrayLog ("error: " + $_.Exception.Message) }
@@ -257,8 +329,7 @@ $openItem.add_Click({ Invoke-Safely { Start-Process $DashboardUrl } })
 $restartItem = New-Object System.Windows.Forms.ToolStripMenuItem 'Avvia / riavvia'
 $restartItem.add_Click({
     Invoke-Safely {
-        [void](Invoke-Schtasks (Get-EndArgs 'dashboard'))   # fails harmlessly when it is not running
-        if (Start-SecondBrainTask 'dashboard') { Show-Balloon 'Dashboard avviata: l''icona diventa verde quando risponde.' -Always }
+        Restart-Dashboard
         $script:ExpectDown = $false
         $script:RecheckTimer.Start()
     }
