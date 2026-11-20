@@ -54,6 +54,19 @@ class Morning(unittest.TestCase):
         rc, _ = self.vai(self.lancia(), pronti=rotto)
         self.assertEqual((rc, self.chiamate[0][-1]), (0, "/morning"))
 
+    def test_smistatore_solo_se_config_lo_indica(self):
+        v = Path(self.tmp.name)
+        lanci = []
+        def run(cmd, **kw):
+            lanci.append(cmd)
+            return Esito(0, "- task pronto\n")
+        self.assertEqual(morning.pronti_smistatore(v, run), "")                       # niente config.json
+        (v / "config.json").write_text('{"modelli": {}}', encoding="utf-8")
+        self.assertEqual((morning.pronti_smistatore(v, run), lanci), ("", []))       # config senza la chiave
+        (v / "config.json").write_text('{"smistatore": "~/s/bin/smistatore"}', encoding="utf-8")
+        self.assertEqual(morning.pronti_smistatore(v, run), "- task pronto")
+        self.assertEqual(lanci[0][2], str(Path.home() / "s" / "bin" / "smistatore"))
+
     def test_dry_run_stampa_e_non_esegue(self):
         rc, out = self.vai(self.lancia(), {"MORNING_DRY_RUN": "1"})
         self.assertEqual((rc, self.chiamate), (0, []))
