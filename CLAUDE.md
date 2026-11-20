@@ -39,6 +39,8 @@ A commit runs gitleaks on the staged changes and `scripts/verify` by itself, plu
 
 - `projects/`, `daily/`, `inbox/`, `radar/`, `content/`: the notes. This is where you write.
 - `memory/`, `docs/adr/` and this file: who the user is, the decisions, the rules. A change needs a yes.
+- `docs/piano.md`, `docs/obiettivi.md`, `docs/scadenze.md`: the plan, the goals and the deadlines the dashboard and the map read. `docs/calendari.md` and `docs/servizi.md` feed two dashboard sections; the other `docs/*.md` are optional guides. Specs and plans written with superpowers go in `docs/specs/` and `docs/superpowers/plans/`.
+- `kit/`: lists of plugins and skills that `/kit <name>` proposes, one at a time, after `scan-before-install`.
 - `scripts/`: the routines, each with its `test_` file next to it. `scripts/dashboard/` is the local dashboard, `scripts/hooks/` the commit hook.
 - `.claude/`: commands, subagents, rules loaded by path, hooks and permissions.
 - `modules/` and the Python files at the root: the first-run wizard, the prerequisites check and the scheduled jobs. `tests/` holds their tests.
