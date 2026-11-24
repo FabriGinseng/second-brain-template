@@ -3,6 +3,7 @@
 (le azioni con conferma vengono negate e finiscono in "Da confermare").
 Uso: scripts/morning.py   (MORNING_DRY_RUN=1 stampa il comando senza eseguirlo)
 """
+import json
 import os
 import shlex
 import subprocess
@@ -15,13 +16,17 @@ import avviso  # noqa: E402
 
 VAULT = Path(__file__).resolve().parent.parent
 CMD = ["claude", "--permission-mode", "dontAsk", "--allowedTools", "Bash(git log *)", "Bash(git status *)", "-p", "/morning"]
-SMISTATORE = Path.home() / "Developer" / "smistatore" / "bin" / "smistatore"
 
 
-def pronti_smistatore():
+def pronti_smistatore(vault=VAULT, run=subprocess.run):
     """Task pronti dei piani approvati, letti qui e passati nel prompt: nella run non presidiata Bash è negato e il PATH del
-    job non ha ~/.local/bin (errore ricorrente del 2026-10-27)."""
-    r = subprocess.run(["/usr/bin/python3", "-I", str(SMISTATORE), "pronti", "--markdown"], capture_output=True, text=True, encoding="utf-8", timeout=60)
+    job non ha ~/.local/bin (errore ricorrente del 2026-10-27). Lo smistatore è facoltativo: il suo percorso sta in
+    config.json ({"smistatore": "~/Developer/smistatore/bin/smistatore"}); senza la chiave non si lancia niente."""
+    file = Path(vault) / "config.json"
+    percorso = json.loads(file.read_text(encoding="utf-8-sig")).get("smistatore") if file.is_file() else None  # -sig: a BOM from a Windows editor
+    if not percorso:
+        return ""
+    r = run(["/usr/bin/python3", "-I", str(Path(percorso).expanduser()), "pronti", "--markdown"], capture_output=True, text=True, encoding="utf-8", timeout=60)
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
