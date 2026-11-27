@@ -46,6 +46,7 @@ harness_modulo = _modulo(HERE.parent / "harness-progetti.py")
 agenda_modulo = _modulo(HERE / "agenda.py")
 assistente_modulo = _modulo(HERE / "assistente.py")
 limiti_modulo = _modulo(HERE / "limiti.py")
+orchestratore_modulo = _modulo(HERE / "orchestratore.py")
 modello_modulo = _modulo(HERE.parent / "modello.py")
 percorsi = _modulo(HERE.parent / "percorsi.py")
 calendario_modulo = _modulo(HERE.parent / "calendario.py")
@@ -2081,6 +2082,26 @@ def immagine_bozza(nome, cartella=BOZZE):
     return None
 
 
+def orchestratore_repo(vault):
+    """{«progetto/repo»: cartella} dei repo che la scheda Orchestratore può usare: solo quelli che _cartella_avviabile accetta
+    (mai il lavoro né le cartelle riservate). Con config.json illeggibile l'elenco è vuoto: fail closed (ADR-002)."""
+    try:
+        scelta = percorsi.scelta_riservata(vault)
+        basi = _basi_riservate(vault, scelta)
+        indice = progetti_indice(vault, percorsi.nomi_riservati(scelta))
+    except (RuntimeError, OSError):
+        return {}
+    out = {}
+    for info in indice.values():
+        if info.get("lavoro"):
+            continue
+        for nome, p in info.get("percorsi_repo", {}).items():
+            cartella = _cartella_avviabile(Path(p), vault, basi)
+            if cartella is not None:
+                out["%s/%s" % (info["nome"], nome)] = cartella
+    return out
+
+
 # Rotte GET che rispondono con JSON: percorso -> funzione senza argomenti (lambda: i test possono sostituire le funzioni del modulo)
 ROTTE_JSON = {
     "/api/stato": lambda: stato(),
@@ -2096,6 +2117,7 @@ ROTTE_JSON = {
     "/api/post/aperte": lambda: {"aperte": post_richieste_aperte()},
     "/api/post": lambda: post_calendari(),
     "/api/avvii": lambda: avvii(),
+    "/api/orchestratore": lambda: orchestratore_modulo.dati(VAULT, repo=lambda: orchestratore_repo(VAULT)),
     "/api/bozze": lambda: bozze_per_rete(),
     "/api/mappa": lambda: mappa(datetime.now()),
 }
