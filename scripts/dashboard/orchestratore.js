@@ -157,6 +157,21 @@
     return nodo('div', '', [testo, nodo('div', 'riga-azioni', [repo, bottone('Classifica', () => classifica(null), true)]), proposta]);
   }
 
+  const ESITI = { verde: 'riuscita', da_rivedere: 'da rivedere', rosso: 'fallita', manomesso: 'fermata (manomissione)', errore: 'errore',
+    avviato: 'avviata in Claude Code', 'in sessione': 'in questa sessione', 'in corso': 'in corso', 'non lanciata': 'solo classificata', a_fabrizio: 'tornata a te' };
+
+  // Dove è andata la richiesta: harness (ciò che esegue), agente (chi lavora dentro), modello, esito. Chi non è stata lanciata non ha nulla di tutto questo.
+  function esecuzione(v) {
+    if (!v.harness) return nodo('div', 'sub', [ESITI[v.esito] || v.esito]);
+    const pezzi = [['Harness', v.harness], ['Agente', v.agente], ['Modello', v.modello], ['Esito', ESITI[v.esito] || v.esito]];
+    if (typeof v.costo === 'number') pezzi.push(['Costo', v.costo.toFixed(4) + ' $']);
+    const riga = nodo('div', 'orch-esecuzione', pezzi.map(([k, x]) => nodo('span', 'orch-chip', [nodo('i', '', [k + ' ']), String(x)])));
+    if (v.tentativi && v.tentativi.length > 1) {  // salita di livello: ogni passo con il suo modello
+      riga.appendChild(nodo('div', 'sub', ['Tentativi: ' + v.tentativi.map(t => t.livello + ' (' + t.modello + ') ' + (ESITI[t.esito] || t.esito)).join(' → ')]));
+    }
+    return riga;
+  }
+
   function storico() {
     const voci = STATO.dati.storico;
     if (!voci.length) return nodo('p', 'sub', ['Ancora nessuna richiesta.']);
@@ -166,7 +181,7 @@
       if (v.proposto) dettaglio.push('proposto: ' + v.proposto);
       else if (v.corretto_in) dettaglio.push('corretto in ' + v.corretto_in);
       lista.appendChild(nodo('li', '', [nodo('span', 'dato', [new Date(v.quando).toLocaleString('it-IT')]), ' ', nodo('b', '', [v.richiesta]), ' ',
-        nodo('span', 'sub', [dettaglio.join(' · ')]), ' ', bottone('Usa questo tipo', () => STATO.usaDaStorico(v))]));
+        nodo('span', 'sub', [dettaglio.join(' · ')]), ' ', bottone('Usa questo tipo', () => STATO.usaDaStorico(v)), esecuzione(v)]));
     });
     return lista;
   }
@@ -179,7 +194,7 @@
     $('orch-contenuto').replaceChildren(
       errori.length ? nodo('p', 'sub errore', ['Impostazioni da correggere: ' + errori.join('; ')]) : nodo('span'),
       sezione('Richiesta', richiesta()),
-      sezione('Storico', storico()),
+      sezione('Cronologia', storico()),
       sezione('Tipi di task', righeTipi()),
       sezione('Modelli aperti', modelliAperti()),
       sezione('Frontiera', frontiera()),

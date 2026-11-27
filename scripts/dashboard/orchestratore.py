@@ -64,7 +64,7 @@ def dati(vault, run=subprocess.run, repo=lambda: {}):
     if percorso_smistatore(vault) is None:
         return {"attivo": False}
     try:
-        return {"attivo": True, "config": chiama(vault, ["config", "mostra"], run), "storico": chiama(vault, ["storico", "--limite", "20"], run),
+        return {"attivo": True, "config": chiama(vault, ["config", "mostra"], run), "storico": chiama(vault, ["storico", "--limite", "50"], run),
                 "repo": sorted(repo()), "sistema": sys.platform}
     except OrchestratoreErrore as e:
         return {"attivo": True, "errore": e.codice}
@@ -152,19 +152,20 @@ def classifica(vault, richiesta, repo, elenco, tipo=None, livello=None, run=subp
     return chiama(vault, argv, run)
 
 
-def _apri_terminale(cartella, modello, richiesta, cartella_avvii, run):
-    """`claude --model <modello>` in un terminale nella cartella del repo. La richiesta sta in un file 0600 letto da `cat`: non
-    finisce mai in una stringa di shell. Cartella e modello sono quotati."""
+def _apri_terminale(cartella, smistatore, scelta, richiesta, cartella_avvii, run):
+    """Un terminale che lancia `smistatore chiedi` nella cartella del repo (e lo smistatore avvia claude: un solo motore, che scrive
+    la sua riga di registro). La richiesta sta in un file 0600 letto da `cat`: non finisce mai in una stringa di shell. Percorsi e
+    argomenti della scelta sono quotati."""
     cartella_avvii.mkdir(mode=0o700, parents=True, exist_ok=True)
     for f in cartella_avvii.iterdir():  # file di avvii vecchi di una settimana
         if f.is_file() and f.stat().st_mtime < time.time() - 7 * 86400:
             f.unlink()
     base = cartella_avvii / (datetime.now().strftime("%Y%m%d-%H%M%S-%f") + "-" + os.urandom(4).hex())
     file_prompt, file_comando = base.with_suffix(".txt"), base.with_suffix(".command")
-    for file, contenuto, modo in (
-            (file_prompt, richiesta, 0o600),
-            (file_comando, "#!/bin/zsh -l\ncd %s && exec claude --model %s \"$(cat %s)\"\n"
-             % (shlex.quote(str(cartella)), shlex.quote(modello), shlex.quote(str(file_prompt))), 0o700)):
+    comando = "#!/bin/zsh -l\ncd %s && exec %s chiedi \"$(cat %s)\" --repo %s %s\n" % (
+        shlex.quote(str(cartella)), shlex.quote(str(smistatore)), shlex.quote(str(file_prompt)), shlex.quote(str(cartella)),
+        " ".join(shlex.quote(a) for a in scelta))
+    for file, contenuto, modo in ((file_prompt, richiesta, 0o600), (file_comando, comando, 0o700)):
         fd = os.open(file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, modo)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(contenuto)
@@ -180,7 +181,7 @@ def avvia(vault, richiesta, repo, elenco, tipo=None, livello=None, prima=None, r
           cartella_avvii=None, cartella_log=None, adesso=time.monotonic, sistema=None):
     """Lancia la richiesta dove la decisione dello smistatore dice. La decisione la ricalcola sempre il server: del browser
     contano solo richiesta, repo e un tipo o livello scelti, che lo smistatore può scavalcare (repo riservato → alto).
-    basso/medio: `smistatore chiedi` staccato (su Paseo); alto: Terminale con claude. Solo macOS.
+    basso/medio: `smistatore chiedi` staccato (su Paseo); alto: Terminale che lancia `smistatore chiedi` (che avvia claude). Solo macOS.
     NotImplementedError: altro sistema. ValueError: richiesta. LookupError: repo. RuntimeError con codice: ripetuto, apertura."""
     sistema = sistema or sys.platform
     if sistema != "darwin":
@@ -194,15 +195,16 @@ def avvia(vault, richiesta, repo, elenco, tipo=None, livello=None, prima=None, r
         if chiave in ULTIMI and adesso() - ULTIMI[chiave] < DEBOUNCE:
             raise RuntimeError("ripetuto")
         ULTIMI[chiave] = adesso()
+    scelta = ["--tipo", d["tipo"]] if d.get("tipo") else ["--livello", d["livello"]]  # la decisione è del server, non del browser
+    if prima is not None:
+        scelta += ["--prima", _campo(prima)]
+    smistatore = percorso_smistatore(vault)
     if d["esecutore"] == "sessione":
-        _apri_terminale(cartella, d["modello"], testo, Path(cartella_avvii), run)
+        _apri_terminale(cartella, smistatore, scelta, testo, Path(cartella_avvii), run)
     else:
-        argv = [str(percorso_smistatore(vault)), "chiedi", testo, "--repo", str(cartella)]
-        argv += ["--tipo", d["tipo"]] if d.get("tipo") else ["--livello", d["livello"]]
-        if prima is not None:
-            argv += ["--prima", _campo(prima)]
         cartella_log = Path(cartella_log or cartella_avvii)
         cartella_log.mkdir(mode=0o700, parents=True, exist_ok=True)
         with open(cartella_log / ("orchestratore-%s.log" % datetime.now().strftime("%Y%m%d-%H%M%S-%f")), "ab") as f:
-            lancia(argv, stdin=subprocess.DEVNULL, stdout=f, stderr=subprocess.STDOUT, start_new_session=True, close_fds=True)
+            lancia([str(smistatore), "chiedi", testo, "--repo", str(cartella), *scelta], stdin=subprocess.DEVNULL, stdout=f,
+                   stderr=subprocess.STDOUT, start_new_session=True, close_fds=True)
     return {"ok": True, "tipo": d.get("tipo"), "livello": d.get("livello"), "modello": d["modello"], "esecutore": d["esecutore"]}

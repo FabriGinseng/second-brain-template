@@ -3,6 +3,7 @@
 import importlib.util
 import json
 import os
+import shlex
 import stat
 import subprocess
 import tempfile
@@ -126,6 +127,16 @@ class Dati(Base):
         d = orch.dati(self.vault, repo=lambda: {"p/r": Path("/x")})
         self.assertEqual((d["attivo"], d["config"]["valori"]["frontiera"], d["storico"][0]["tipo_task"], d["repo"]), (True, "opus", "debug", ["p/r"]))
         self.assertNotIn("/x", json.dumps(d))
+
+    def test_la_cronologia_chiede_cinquanta_voci(self):
+        visti = []
+
+        def run(cmd, **kw):
+            visti.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, stdout="{}", stderr="")
+        self.config(eseguibile(self.dir, "true"))
+        orch.dati(self.vault, run=run)
+        self.assertIn(["--limite", "50"], [c[-2:] for c in visti if "storico" in c])
 
     def test_un_errore_dello_smistatore_da_attivo_con_errore(self):
         self.config(eseguibile(self.dir, "echo rotto"))
@@ -314,16 +325,19 @@ class Avvia(Base):
         self.assertFalse(kw.get("shell"))
         self.assertEqual((r["ok"], r["esecutore"], r["modello"]), (True, "paseo", "m-basso"))
 
-    def test_alto_apre_il_terminale_con_il_modello_di_frontiera(self):
+    def test_alto_apre_il_terminale_con_lo_smistatore_non_con_claude(self):
         self.decisione = dict(ALTO)
-        r = self.vai("perché si blocca?")
+        r = self.vai("perché si blocca?", prima="ripetitivo")
         self.assertEqual(self.lanci, [])
         cmd, _ = self.aperture[0]
         self.assertEqual(cmd[:3], ["/usr/bin/open", "-a", "Terminal"])
         comando = Path(cmd[3])
         testo_comando = comando.read_text()
-        self.assertIn("exec claude --model opus", testo_comando)
-        self.assertIn(str(self.repo_dir), testo_comando)
+        smistatore = str(self.dir / "smistatore")
+        # un solo motore: è lo smistatore a lanciare claude, e così scrive la sua riga di registro
+        self.assertIn("exec %s chiedi \"$(cat " % shlex.quote(smistatore), testo_comando)
+        self.assertIn("--repo %s --tipo debug --prima ripetitivo" % shlex.quote(str(self.repo_dir)), testo_comando)
+        self.assertNotIn("claude", testo_comando)
         self.assertNotIn("perché", testo_comando)  # il testo sta nel file del prompt, non nel comando
         prompt = comando.with_suffix(".txt")
         self.assertEqual(prompt.read_text(), "perché si blocca?")
@@ -331,10 +345,17 @@ class Avvia(Base):
         self.assertEqual(oct(comando.stat().st_mode & 0o777), "0o700")
         self.assertEqual((r["esecutore"], r["modello"]), ("sessione", "opus"))
 
-    def test_il_modello_con_caratteri_di_shell_e_quotato(self):
-        self.decisione = {**ALTO, "modello": "x; touch /tmp/x-orch3"}
+    def test_tipo_e_prima_con_caratteri_di_shell_sono_quotati(self):
+        self.decisione = {**ALTO, "tipo": "x; touch /tmp/x-orch3"}
+        self.vai(prima="y $(touch /tmp/x-orch4)")
+        testo = Path(self.aperture[0][0][3]).read_text()
+        self.assertIn("'x; touch /tmp/x-orch3'", testo)
+        self.assertIn("'y $(touch /tmp/x-orch4)'", testo)
+
+    def test_senza_tipo_il_terminale_porta_il_livello(self):
+        self.decisione = {**ALTO, "tipo": None}
         self.vai()
-        self.assertIn("'x; touch /tmp/x-orch3'", Path(self.aperture[0][0][3]).read_text())
+        self.assertIn("--livello alto", Path(self.aperture[0][0][3]).read_text())
 
     def test_doppio_clic_lancia_una_volta(self):
         self.vai()

@@ -854,6 +854,11 @@ class SchedaOrchestratore(unittest.TestCase):
         for rotta in set(re.findall(r"'(/api/orchestratore[\w/]*)'", self.js)):
             self.assertIn('"%s"' % rotta, server, rotta)
 
+    def test_la_cronologia_mostra_harness_agente_modello_ed_esito(self):
+        self.assertIn("sezione('Cronologia'", self.js)
+        for campo in ("v.harness", "v.agente", "v.modello", "v.esito", "v.tentativi"):
+            self.assertIn(campo, self.js)
+
     def test_il_lancio_dice_che_e_solo_macos(self):
         self.assertIn("darwin", self.js)
 

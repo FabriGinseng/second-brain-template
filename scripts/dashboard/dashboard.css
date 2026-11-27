@@ -866,3 +866,7 @@ details.resto[open] > summary::before { transform: rotate(45deg); }
 #orchestratore-vista .orch-proposta { margin-top: 12px; }
 #orchestratore-vista .errore { color: var(--negative); }
 @media (max-width: 720px) { #orchestratore-vista table.orch-tipi, #orchestratore-vista table.orch-tipi tbody, #orchestratore-vista table.orch-tipi tr, #orchestratore-vista table.orch-tipi td { display: block; } #orchestratore-vista table.orch-tipi thead { display: none; } }
+#orchestratore-vista .orch-storico li { flex-direction: row; }
+#orchestratore-vista .orch-esecuzione { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 6px; }
+#orchestratore-vista .orch-chip { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-chip); padding: 2px 8px; font-size: 12px; }
+#orchestratore-vista .orch-chip i { color: var(--muted); font-style: normal; }
