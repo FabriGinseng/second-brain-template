@@ -135,5 +135,5 @@
 - [ ] **Step 1:** `README.md`: la scheda, la chiave `"smistatore"`, che il lancio è solo macOS, cosa non si può fare da dashboard (i repo riservati) e i comandi/rotte nuovi. `python3 scripts/verify` stampa `OK`.
 - [ ] **Step 2:** lancia la skill `security-review` sul diff del ramo, con attenzione a Task 4; correggi i problemi Critical/Important con un test ciascuno.
 - [ ] **Step 3:** `python3 scripts/check` completo. Expected: tutto verde.
-- [ ] **Step 4:** prova reale con il via di Fabrizio: dalla scheda classifica una richiesta, cambia il tipo, avviane una `basso` (Paseo) e una `alto` (Terminale). Expected: ramo `da_rivedere` visibile, riga `classifica` e `correzione` nello storico.
-- [ ] **Step 5: commit** `docs: scheda Orchestratore nel README`. La PR la apre Fabrizio (nessun push senza il suo sì).
+- [ ] **Step 4:** prova reale con il via dell'utente: dalla scheda classifica una richiesta, cambia il tipo, avviane una `basso` (Paseo) e una `alto` (Terminale). Expected: ramo `da_rivedere` visibile, riga `classifica` e `correzione` nello storico.
+- [ ] **Step 5: commit** `docs: scheda Orchestratore nel README`. La PR si apre solo con il sì dell'utente (nessun push senza).
