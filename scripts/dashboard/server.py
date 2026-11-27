@@ -46,12 +46,14 @@ harness_modulo = _modulo(HERE.parent / "harness-progetti.py")
 agenda_modulo = _modulo(HERE / "agenda.py")
 assistente_modulo = _modulo(HERE / "assistente.py")
 limiti_modulo = _modulo(HERE / "limiti.py")
+orchestratore_modulo = _modulo(HERE / "orchestratore.py")
 modello_modulo = _modulo(HERE.parent / "modello.py")
 percorsi = _modulo(HERE.parent / "percorsi.py")
 calendario_modulo = _modulo(HERE.parent / "calendario.py")
 dipendenze = _modulo(HERE.parent / "dipendenze.py")
 BLOCCO_RICHIESTE = threading.Lock()  # una scrittura alla volta sul file delle richieste
 BLOCCO_PIANO = threading.Lock()  # lettura, modifica e scrittura di piano.md e scadenze.md: due clic veloci sono due thread
+BLOCCO_ORCHESTRATORE = threading.Lock()  # un cambio alle impostazioni dell'orchestratore alla volta
 BLOCCO_CONFIG = threading.Lock()  # un solo cambio alla volta ai file globali di Claude
 PORTA = 8765
 HOST_OK = {"127.0.0.1:%d" % PORTA, "localhost:%d" % PORTA}
@@ -804,6 +806,7 @@ REPO_MASSIMO = 400
 CODICI_PROGETTO = {"nome", "repo", "stack", "priorita", "lavoro", "esiste", "template", "riga", "harness", "spento", "senza-repo", "righe",
                    "config", "archivio", "ha-repo"}
 # the same allow-list for the map's routes (stato, avvia, nuovo): the codes avvia_claude, imposta_stato and aggiungi_voce raise
+CODICI_ORCHESTRATORE = {"ripetuto", "apertura"}
 CODICI_MAPPA = {"doppia", "tuo", "in_attesa", "repo", "scegli_repo", "cartella", "config", "ripetuto", "apertura"}
 # The routes whose page shows the error text as it is send only these fixed sentences (from assistente.py, configurazione.py,
 # controllo-skill.py and the routes themselves); any other text goes out as a fixed sentence of its own.
@@ -2081,6 +2084,26 @@ def immagine_bozza(nome, cartella=BOZZE):
     return None
 
 
+def orchestratore_repo(vault):
+    """{«progetto/repo»: cartella} dei repo che la scheda Orchestratore può usare: solo quelli che _cartella_avviabile accetta
+    (mai il lavoro né le cartelle riservate). Con config.json illeggibile l'elenco è vuoto: fail closed (ADR-002)."""
+    try:
+        scelta = percorsi.scelta_riservata(vault)
+        basi = _basi_riservate(vault, scelta)
+        indice = progetti_indice(vault, percorsi.nomi_riservati(scelta))
+    except (RuntimeError, OSError):
+        return {}
+    out = {}
+    for info in indice.values():
+        if info.get("lavoro"):
+            continue
+        for nome, p in info.get("percorsi_repo", {}).items():
+            cartella = _cartella_avviabile(Path(p), vault, basi)
+            if cartella is not None:
+                out["%s/%s" % (info["nome"], nome)] = cartella
+    return out
+
+
 # Rotte GET che rispondono con JSON: percorso -> funzione senza argomenti (lambda: i test possono sostituire le funzioni del modulo)
 ROTTE_JSON = {
     "/api/stato": lambda: stato(),
@@ -2096,6 +2119,8 @@ ROTTE_JSON = {
     "/api/post/aperte": lambda: {"aperte": post_richieste_aperte()},
     "/api/post": lambda: post_calendari(),
     "/api/avvii": lambda: avvii(),
+    "/api/orchestratore/attivo": lambda: {"attivo": orchestratore_modulo.percorso_smistatore(VAULT) is not None},  # senza lanciare niente
+    "/api/orchestratore": lambda: orchestratore_modulo.dati(VAULT, repo=lambda: orchestratore_repo(VAULT)),
     "/api/bozze": lambda: bozze_per_rete(),
     "/api/mappa": lambda: mappa(datetime.now()),
 }
@@ -2103,6 +2128,7 @@ ROTTE_JSON = {
 STATICI = {"/dashboard.js": ("dashboard.js", "text/javascript; charset=utf-8"),
            "/mappa.js": ("mappa.js", "text/javascript; charset=utf-8"),
            "/componenti.js": ("componenti.js", "text/javascript; charset=utf-8"),
+           "/orchestratore.js": ("orchestratore.js", "text/javascript; charset=utf-8"),
            "/dashboard.css": ("dashboard.css", "text/css; charset=utf-8")}
 
 
@@ -2146,6 +2172,12 @@ class Gestore(BaseHTTPRequestHandler):
             return
         if percorso in ("/api/post/richiesta", "/api/post/richiesta/annulla"):
             self._post_richiesta(percorso.endswith("/annulla"))
+            return
+        if percorso == "/api/orchestratore/config":
+            self._orchestratore_config()
+            return
+        if percorso in ("/api/orchestratore/classifica", "/api/orchestratore/avvia"):
+            self._orchestratore_richiesta(percorso.endswith("/avvia"))
             return
         if percorso in ("/api/configurazione/interruttore", "/api/configurazione/aggiorna"):
             self._configura(percorso.rsplit("/", 1)[1])
@@ -2478,6 +2510,52 @@ class Gestore(BaseHTTPRequestHandler):
 
     def _errore(self, codice, messaggio):
         self._json({"errore": messaggio}, codice)
+
+    def _orchestratore_config(self):
+        """Cambi alle impostazioni dell'orchestratore: la richiesta passa per config_argv (tabella fissa) e poi per lo smistatore."""
+        try:
+            argv = orchestratore_modulo.config_argv(self._corpo_json())
+        except ValueError:
+            self._errore(400, "richiesta non valida")
+            return
+        with BLOCCO_ORCHESTRATORE:
+            try:
+                self._json(orchestratore_modulo.cambia_config(VAULT, argv))
+            except orchestratore_modulo.OrchestratoreErrore as e:
+                self._errore(409, orchestratore_modulo.senza_home(e.testo) or e.codice)
+
+    def _orchestratore_richiesta(self, avvia):
+        """«classifica» dà la scelta senza lanciare; «avvia» lancia dove lo smistatore decide. Il browser manda richiesta, nome del repo
+        e un tipo o livello facoltativi: la cartella e la decisione le ricava il server (elenco dei repo avviabili, poi lo smistatore)."""
+        corpo = self._corpo_json(20000)
+        campi = ("richiesta", "repo", "tipo", "livello", "prima")
+        if (corpo is None or set(corpo) - set(campi) or not isinstance(corpo.get("repo"), str) or len(corpo["repo"]) > 200
+                or any(corpo.get(c) is not None and not isinstance(corpo[c], str) for c in campi)):
+            self.send_error(400)
+            return
+        try:
+            elenco = orchestratore_repo(VAULT)
+            if avvia:
+                esito = orchestratore_modulo.avvia(
+                    VAULT, corpo.get("richiesta"), corpo["repo"], elenco, tipo=corpo.get("tipo"), livello=corpo.get("livello"),
+                    prima=corpo.get("prima"), cartella_avvii=percorsi.cartella_log() / "avvii-orchestratore")
+            else:
+                esito = orchestratore_modulo.classifica(VAULT, corpo.get("richiesta"), corpo["repo"], elenco,
+                                                        tipo=corpo.get("tipo"), livello=corpo.get("livello"))
+        except ValueError:
+            self.send_error(400)
+        except LookupError:
+            self.send_error(404)
+        except NotImplementedError:
+            self.send_error(501)
+        except RuntimeError as e:
+            self._json({"errore": str(e) if str(e) in CODICI_ORCHESTRATORE else "errore"}, 409)
+        except orchestratore_modulo.OrchestratoreErrore as e:
+            self._errore(409, orchestratore_modulo.senza_home(e.testo) or e.codice)
+        except OSError:
+            self.send_error(500)
+        else:
+            self._json(esito)
 
     def _configura(self, azione):
         """Cambi ai file globali di Claude: interruttori di skill e plugin, aggiornamento di una skill già controllata."""

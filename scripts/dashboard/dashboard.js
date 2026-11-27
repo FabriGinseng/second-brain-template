@@ -1635,8 +1635,9 @@ const CARICA = {
   consumi: () => { mostraSchedaConsumi(schedaConsumi); return Promise.all([blocco('consumi-servizi') && aggiornaServizi(), aggiornaPrestazioni(), aggiorna()]); },
   avvii: () => { aggiornaAvvii(); aggiorna(); },
   configurazione: aggiornaConfigurazione,
+  orchestratore: () => window.Orchestratore && window.Orchestratore.carica(),
 };
-const TITOLI = { mappa: 'Mappa', agenda: 'Agenda', radar: 'Radar', post: 'Post', consumi: 'Consumi', avvii: 'Avvii', configurazione: 'Configurazione' };
+const TITOLI = { mappa: 'Mappa', agenda: 'Agenda', radar: 'Radar', post: 'Post', consumi: 'Consumi', avvii: 'Avvii', orchestratore: 'Orchestratore', configurazione: 'Configurazione' };
 // Gli indirizzi delle pagine che non ci sono più portano alla pagina che le ha assorbite (e, per Consumi, alla sua sezione).
 const ALIAS = { oggi: 'mappa', piano: 'mappa', progetti: 'mappa', bozze: 'post', servizi: 'consumi', claude: 'consumi', prestazioni: 'consumi' };
 const SEZIONE = { servizi: 'servizi', claude: 'claude', prestazioni: 'locale' };
@@ -1713,6 +1714,8 @@ $('tema').addEventListener('click', () => {
 const hashIniziale = location.hash.slice(1);
 caricaModuli().then(() => {
   mostra(hashIniziale);
+  // La scheda Orchestratore non blocca l'avvio: la voce di menu compare quando la rotta leggera risponde.
+  if (window.Orchestratore) window.Orchestratore.inizializza().then(ok => { if (ok && hashIniziale === 'orchestratore') mostra('orchestratore'); });
   if (hashIniziale === 'bozze' && ammessa('post')) mostraSchedaPost('bozze');
   if (ammessa('post')) aggiornaBadgePost();
   setInterval(() => { CARICA[vista](); if (ammessa('post')) aggiornaBadgePost(); }, 30000);
