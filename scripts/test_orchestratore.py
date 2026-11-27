@@ -222,6 +222,13 @@ echo '{"valori": {}, "origine": {}}'
         self.assertIn("livello enorme", r["errore"])
         self.assertNotIn(str(Path.home()), r["errore"])
 
+    def test_classifica_e_avvia_validano_prima_di_tutto(self):
+        for rotta in ("/api/orchestratore/classifica", "/api/orchestratore/avvia"):
+            for corpo in ({}, {"richiesta": "", "repo": "x"}, {"richiesta": "a" * 4001, "repo": "x"}, {"richiesta": "ok", "repo": 5},
+                          {"richiesta": 5, "repo": "x"}, {"richiesta": "ok"}, {"richiesta": "ok", "repo": "x", "tipo": 5}):
+                self.assertEqual(self.post(rotta, corpo)[0], 400, (rotta, corpo))
+            self.assertEqual(self.post(rotta, {"richiesta": "ok", "repo": "non/esiste"})[0], 404, rotta)
+
     def test_senza_la_chiave_e_409_assente(self):
         (self.vault / "config.json").write_text("{}")
         try:
@@ -229,6 +236,175 @@ echo '{"valori": {}, "origine": {}}'
         finally:
             (self.vault / "config.json").write_text(json.dumps({"smistatore": str(self.dir / "smistatore")}))
         self.assertEqual((stato, r), (409, {"errore": "assente"}))
+
+
+DECISIONE = {"esito": "classificato", "tipo": "ripetitivo", "livello": "basso", "motivo": "", "incerto": False, "backend": "openrouter",
+             "costo": 0.0001, "durata": 0.5, "riservato": False, "modello": "m-basso", "esecutore": "paseo"}
+ALTO = {**DECISIONE, "tipo": "debug", "livello": "alto", "modello": "opus", "esecutore": "sessione"}
+
+
+class Avvia(Base):
+    def setUp(self):
+        super().setUp()
+        self.config(eseguibile(self.dir, "true"))
+        self.repo_dir = self.dir / "progetto"
+        self.repo_dir.mkdir()
+        self.elenco = {"p/r": self.repo_dir}
+        self.chiamate, self.lanci, self.aperture = [], [], []
+        self.decisione = dict(DECISIONE)
+        self.avvii = self.dir / "avvii"
+        self.t = 100.0
+        orch.ULTIMI.clear()
+
+    def finto(self, cmd, **kw):
+        self.chiamate.append(cmd)
+        if "--solo-classifica" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(self.decisione), stderr="")
+        self.aperture.append((cmd, kw))
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    def lancia(self, cmd, **kw):
+        self.lanci.append((cmd, kw))
+
+    def vai(self, richiesta="rinomina x", repo="p/r", **kw):
+        return orch.avvia(self.vault, richiesta, repo, self.elenco, run=self.finto, lancia=self.lancia, cartella_avvii=self.avvii,
+                          adesso=lambda: self.t, sistema=kw.pop("sistema", "darwin"), **kw)
+
+    def test_il_testo_arriva_intatto_come_argomento(self):
+        strano = "rinomina \"a\" «b» $(touch /tmp/x-orch2) `ls`\nriga due"
+        self.vai(strano)
+        solo = self.chiamate[0]
+        self.assertEqual(solo[solo.index("chiedi") + 1], strano)
+        self.assertEqual(self.lanci[0][0][self.lanci[0][0].index("chiedi") + 1], strano)
+        self.assertFalse(Path("/tmp/x-orch2").exists())
+
+    def test_richiesta_con_trattino_non_diventa_un_flag(self):
+        self.vai("--dangerously-skip-permissions")
+        for cmd in (self.chiamate[0], self.lanci[0][0]):
+            testo = cmd[cmd.index("chiedi") + 1]
+            self.assertFalse(testo.startswith("-"))
+            self.assertEqual(testo.strip(), "--dangerously-skip-permissions")
+
+    def test_richiesta_vuota_o_oltre_4000_o_con_byte_nulli_e_valueerror(self):
+        for r in ("", "  \n", "a" * 4001, "a\x00b", None, 5):
+            with self.assertRaises(ValueError):
+                self.vai(r)
+        self.assertEqual((self.chiamate, self.lanci), ([], []))
+
+    def test_repo_fuori_elenco_e_lookuperror(self):
+        for nome in ("altro/repo", "../..", "/etc", "", None):
+            with self.assertRaises((LookupError, ValueError)):
+                self.vai(repo=nome)
+        self.assertEqual((self.chiamate, self.lanci), ([], []))
+
+    def test_il_livello_del_browser_non_vale(self):
+        self.decisione = {**ALTO, "riservato": True}
+        r = self.vai(livello="basso")
+        self.assertIn("--livello", self.chiamate[0])  # lo smistatore riceve la richiesta del browser...
+        self.assertEqual((r["esecutore"], r["livello"], self.lanci), ("sessione", "alto", []))  # ...e decide lui: riservato, quindi alto
+
+    def test_basso_parte_staccato_senza_shell(self):
+        r = self.vai(tipo="ripetitivo", prima="debug")
+        cmd, kw = self.lanci[0]
+        self.assertIsInstance(cmd, list)
+        self.assertEqual((cmd[0], cmd[cmd.index("--repo") + 1], cmd[cmd.index("--tipo") + 1], cmd[cmd.index("--prima") + 1]),
+                         (str(self.dir / "smistatore"), str(self.repo_dir), "ripetitivo", "debug"))
+        self.assertNotIn("--solo-classifica", cmd)
+        self.assertTrue(kw["start_new_session"])
+        self.assertFalse(kw.get("shell"))
+        self.assertEqual((r["ok"], r["esecutore"], r["modello"]), (True, "paseo", "m-basso"))
+
+    def test_alto_apre_il_terminale_con_il_modello_di_frontiera(self):
+        self.decisione = dict(ALTO)
+        r = self.vai("perché si blocca?")
+        self.assertEqual(self.lanci, [])
+        cmd, _ = self.aperture[0]
+        self.assertEqual(cmd[:3], ["/usr/bin/open", "-a", "Terminal"])
+        comando = Path(cmd[3])
+        testo_comando = comando.read_text()
+        self.assertIn("exec claude --model opus", testo_comando)
+        self.assertIn(str(self.repo_dir), testo_comando)
+        self.assertNotIn("perché", testo_comando)  # il testo sta nel file del prompt, non nel comando
+        prompt = comando.with_suffix(".txt")
+        self.assertEqual(prompt.read_text(), "perché si blocca?")
+        self.assertEqual(oct(prompt.stat().st_mode & 0o777), "0o600")
+        self.assertEqual(oct(comando.stat().st_mode & 0o777), "0o700")
+        self.assertEqual((r["esecutore"], r["modello"]), ("sessione", "opus"))
+
+    def test_il_modello_con_caratteri_di_shell_e_quotato(self):
+        self.decisione = {**ALTO, "modello": "x; touch /tmp/x-orch3"}
+        self.vai()
+        self.assertIn("'x; touch /tmp/x-orch3'", Path(self.aperture[0][0][3]).read_text())
+
+    def test_doppio_clic_lancia_una_volta(self):
+        self.vai()
+        with self.assertRaises(RuntimeError) as c:
+            self.vai()
+        self.assertEqual(str(c.exception), "ripetuto")
+        self.assertEqual(len(self.lanci), 1)
+        self.t += 11
+        self.vai()
+        self.assertEqual(len(self.lanci), 2)
+
+    def test_non_macos_e_notimplemented(self):
+        with self.assertRaises(NotImplementedError):
+            self.vai(sistema="win32")
+        self.assertEqual((self.chiamate, self.lanci), ([], []))
+
+    def test_apertura_fallita_e_un_errore_a_codice_fisso(self):
+        self.decisione = dict(ALTO)
+
+        def run(cmd, **kw):
+            if "--solo-classifica" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(ALTO), stderr="")
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="boom")
+        with self.assertRaises(RuntimeError) as c:
+            orch.avvia(self.vault, "x", "p/r", self.elenco, run=run, lancia=self.lancia, cartella_avvii=self.avvii, adesso=lambda: 1.0, sistema="darwin")
+        self.assertEqual(str(c.exception), "apertura")
+
+    def test_classifica_non_lancia_niente(self):
+        r = orch.classifica(self.vault, "rinomina x", "p/r", self.elenco, run=self.finto)
+        self.assertEqual((r["tipo"], r["livello"], r["esecutore"]), ("ripetitivo", "basso", "paseo"))
+        self.assertEqual((len(self.chiamate), self.lanci, self.aperture), (1, [], []))
+        self.assertIn("--solo-classifica", self.chiamate[0])
+
+    def test_il_file_del_prompt_non_si_sovrascrive(self):
+        self.decisione = dict(ALTO)
+        self.vai("uno")
+        self.t += 11
+        self.vai("uno")
+        self.assertEqual(len(list(self.avvii.glob("*.txt"))), 2)
+
+
+class ElencoRepo(unittest.TestCase):
+    def test_solo_i_repo_avviabili_mai_il_lavoro_ne_un_link_verso_il_lavoro(self):
+        spec2 = importlib.util.spec_from_file_location("server_orch_repo", RADICE / "scripts" / "dashboard" / "server.py")
+        server = importlib.util.module_from_spec(spec2)
+        spec2.loader.exec_module(server)
+        with tempfile.TemporaryDirectory() as t:
+            base = Path(t).resolve()
+            vault = base / "vault"
+            (vault / "projects" / "buono").mkdir(parents=True)
+            (vault / "projects" / "lavoro" / "segreto").mkdir(parents=True)
+            buono, nel_lavoro = base / "repo-ok", vault / "projects" / "lavoro" / "segreto"
+            buono.mkdir()
+            link = base / "link-al-lavoro"
+            link.symlink_to(nel_lavoro)
+            (vault / "projects" / "INDEX.md").write_text("| Progetto | A | B | C | D |\n| [[projects/buono/STATE\\|buono]] | x | y | z | alta |\n")
+            (vault / "projects" / "buono" / "STATE.md").write_text("# buono\n- **Repo:** %s\n- **Repo:** %s\n" % (buono, link))
+            elenco = server.orchestratore_repo(vault)
+            self.assertEqual(sorted(str(v) for v in elenco.values()), [str(buono)])
+            self.assertTrue(all(k.startswith("buono/") for k in elenco))
+
+    def test_con_config_json_illeggibile_l_elenco_e_vuoto(self):
+        spec2 = importlib.util.spec_from_file_location("server_orch_repo2", RADICE / "scripts" / "dashboard" / "server.py")
+        server = importlib.util.module_from_spec(spec2)
+        spec2.loader.exec_module(server)
+        with tempfile.TemporaryDirectory() as t:
+            vault = Path(t)
+            (vault / "projects").mkdir()
+            (vault / "config.json").write_text("{rotto")
+            self.assertEqual(server.orchestratore_repo(vault), {})
 
 
 class Rotta(unittest.TestCase):

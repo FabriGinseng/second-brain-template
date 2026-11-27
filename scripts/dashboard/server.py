@@ -806,6 +806,7 @@ REPO_MASSIMO = 400
 CODICI_PROGETTO = {"nome", "repo", "stack", "priorita", "lavoro", "esiste", "template", "riga", "harness", "spento", "senza-repo", "righe",
                    "config", "archivio", "ha-repo"}
 # the same allow-list for the map's routes (stato, avvia, nuovo): the codes avvia_claude, imposta_stato and aggiungi_voce raise
+CODICI_ORCHESTRATORE = {"ripetuto", "apertura"}
 CODICI_MAPPA = {"doppia", "tuo", "in_attesa", "repo", "scegli_repo", "cartella", "config", "ripetuto", "apertura"}
 # The routes whose page shows the error text as it is send only these fixed sentences (from assistente.py, configurazione.py,
 # controllo-skill.py and the routes themselves); any other text goes out as a fixed sentence of its own.
@@ -2173,6 +2174,9 @@ class Gestore(BaseHTTPRequestHandler):
         if percorso == "/api/orchestratore/config":
             self._orchestratore_config()
             return
+        if percorso in ("/api/orchestratore/classifica", "/api/orchestratore/avvia"):
+            self._orchestratore_richiesta(percorso.endswith("/avvia"))
+            return
         if percorso in ("/api/configurazione/interruttore", "/api/configurazione/aggiorna"):
             self._configura(percorso.rsplit("/", 1)[1])
             return
@@ -2517,6 +2521,39 @@ class Gestore(BaseHTTPRequestHandler):
                 self._json(orchestratore_modulo.cambia_config(VAULT, argv))
             except orchestratore_modulo.OrchestratoreErrore as e:
                 self._errore(409, orchestratore_modulo.senza_home(e.testo) or e.codice)
+
+    def _orchestratore_richiesta(self, avvia):
+        """«classifica» dà la scelta senza lanciare; «avvia» lancia dove lo smistatore decide. Il browser manda richiesta, nome del repo
+        e un tipo o livello facoltativi: la cartella e la decisione le ricava il server (elenco dei repo avviabili, poi lo smistatore)."""
+        corpo = self._corpo_json(20000)
+        campi = ("richiesta", "repo", "tipo", "livello", "prima")
+        if (corpo is None or set(corpo) - set(campi) or not isinstance(corpo.get("repo"), str) or len(corpo["repo"]) > 200
+                or any(corpo.get(c) is not None and not isinstance(corpo[c], str) for c in campi)):
+            self.send_error(400)
+            return
+        try:
+            elenco = orchestratore_repo(VAULT)
+            if avvia:
+                esito = orchestratore_modulo.avvia(
+                    VAULT, corpo.get("richiesta"), corpo["repo"], elenco, tipo=corpo.get("tipo"), livello=corpo.get("livello"),
+                    prima=corpo.get("prima"), cartella_avvii=percorsi.cartella_log() / "avvii-orchestratore")
+            else:
+                esito = orchestratore_modulo.classifica(VAULT, corpo.get("richiesta"), corpo["repo"], elenco,
+                                                        tipo=corpo.get("tipo"), livello=corpo.get("livello"))
+        except ValueError:
+            self.send_error(400)
+        except LookupError:
+            self.send_error(404)
+        except NotImplementedError:
+            self.send_error(501)
+        except RuntimeError as e:
+            self._json({"errore": str(e) if str(e) in CODICI_ORCHESTRATORE else "errore"}, 409)
+        except orchestratore_modulo.OrchestratoreErrore as e:
+            self._errore(409, orchestratore_modulo.senza_home(e.testo) or e.codice)
+        except OSError:
+            self.send_error(500)
+        else:
+            self._json(esito)
 
     def _configura(self, azione):
         """Cambi ai file globali di Claude: interruttori di skill e plugin, aggiornamento di una skill già controllata."""
