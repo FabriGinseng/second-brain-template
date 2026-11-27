@@ -2,7 +2,7 @@
 // Parla solo con le rotte /api/orchestratore*; il server lancia lo smistatore e decide il livello. Il DOM si costruisce con
 // createElement e textContent: nessun HTML da stringhe.
 (function () {
-  const STATO = { dati: null, proposta: null, forzato: null };
+  const STATO = { dati: null, proposta: null, montato: false, configSporca: false };
   const $ = id => document.getElementById(id);
 
   function nodo(tag, classe, figli) {
@@ -59,7 +59,7 @@
     try {
       const config = await chiama('/api/orchestratore/config', corpo);
       STATO.dati.config = config;
-      disegna();
+      disegnaConfig();
       avviso('Salvato.', false);
     } catch (e) { avviso(e.message, true); }
   }
@@ -115,7 +115,7 @@
     testo.placeholder = 'Che cosa vuoi fare?';
     const repo = scelta(d.repo.map(r => [r, r]), d.repo[0]);
     const proposta = nodo('div', 'orch-proposta');
-    const invalida = () => { STATO.proposta = null; STATO.forzato = null; proposta.replaceChildren(); };
+    const invalida = () => { STATO.proposta = null; proposta.replaceChildren(); };
     testo.addEventListener('input', invalida);
     repo.addEventListener('change', invalida);
 
@@ -126,10 +126,10 @@
       tipoSel.addEventListener('change', () => { if (tipoSel.value) livSel.value = valori().tipi[tipoSel.value].livello; });
       const macos = d.sistema === 'darwin';
       const avvia = bottone('Avvia', async () => {
-        const corpo = { richiesta: testo.value, repo: repo.value };
-        if (tipoSel.value && tipoSel.value !== (p.tipo || '')) { corpo.tipo = tipoSel.value; corpo.prima = p.tipo || undefined; }
-        else if (livSel.value !== p.livello) { corpo.livello = livSel.value; corpo.prima = p.tipo || undefined; }
-        else if (STATO.forzato) corpo.tipo = STATO.forzato;
+        // Si rimanda la decisione che l'utente vede (o la sua correzione), mai una nuova classificazione: potrebbe dare un'altra risposta.
+        const corpo = { richiesta: testo.value, repo: repo.value, livello: livSel.value };
+        if (tipoSel.value) corpo.tipo = tipoSel.value;
+        if ((tipoSel.value || '') !== (p.tipo || '') || livSel.value !== p.livello) corpo.prima = p.tipo || undefined;
         try {
           const r = await chiama('/api/orchestratore/avvia', corpo);
           avviso('Partita (' + r.livello + ', ' + r.modello + ', ' + (r.esecutore === 'paseo' ? 'su Paseo' : 'nel terminale') + ').', false);
@@ -150,7 +150,6 @@
       if (forzato) corpo.tipo = forzato;
       try {
         mostraProposta(await chiama('/api/orchestratore/classifica', corpo));
-        STATO.forzato = forzato || null;
       } catch (e) { avviso(e.message, true); }
     }
     STATO.usaDaStorico = (voce) => { testo.value = voce.richiesta; const r = d.repo.find(x => x.split('/').pop() === voce.repo); if (r) repo.value = r; return classifica(voce.tipo_task || null); };
@@ -188,39 +187,60 @@
 
   function sezione(titolo, contenuto) { return nodo('section', '', [nodo('h2', '', [titolo]), contenuto]); }
 
-  function disegna() {
-    const v = valori(), d = STATO.dati;
-    const errori = d.config.errori || [];
-    $('orch-contenuto').replaceChildren(
-      errori.length ? nodo('p', 'sub errore', ['Impostazioni da correggere: ' + errori.join('; ')]) : nodo('span'),
-      sezione('Richiesta', richiesta()),
-      sezione('Cronologia', storico()),
+  // La casella della richiesta e la sua proposta si montano una volta sola: né il refresh periodico né un salvataggio le cancellano.
+  function monta() {
+    STATO.nodoErrori = nodo('div');
+    STATO.nodoStorico = nodo('div');
+    STATO.nodoConfig = nodo('div');
+    STATO.nodoConfig.addEventListener('input', () => { STATO.configSporca = true; });
+    STATO.nodoConfig.addEventListener('change', () => { STATO.configSporca = true; });
+    $('orch-contenuto').replaceChildren(STATO.nodoErrori, sezione('Richiesta', richiesta()), sezione('Cronologia', STATO.nodoStorico), STATO.nodoConfig);
+    STATO.montato = true;
+  }
+
+  function disegnaStorico() { STATO.nodoStorico.replaceChildren(storico()); }
+
+  function disegnaConfig() {
+    const v = valori();
+    const errori = STATO.dati.config.errori || [];
+    STATO.nodoErrori.replaceChildren(errori.length ? nodo('p', 'sub errore', ['Impostazioni da correggere: ' + errori.join('; ')]) : nodo('span'));
+    STATO.nodoConfig.replaceChildren(
       sezione('Tipi di task', righeTipi()),
       sezione('Modelli aperti', modelliAperti()),
       sezione('Frontiera', frontiera()),
       nodo('p', 'sub', ['Classificatore: ' + v.classificatore.backend + ' (' + (v.classificatore.backend === 'ollama' ? v.classificatore.ollama : v.classificatore.modello) + '). ' +
         'Repo riservati: ' + (v.riservati.length ? v.riservati.length : 'nessuno') + ' (si cambiano dal terminale: `smistatore config riservato`).']));
+    STATO.configSporca = false;
     $('orch-dato').textContent = 'Un modello piccolo classifica la richiesta, la tabella dei tipi sceglie il livello.';
   }
 
-  async function leggi() {
-    try { return await (await fetch('/api/orchestratore', { cache: 'no-store' })).json(); } catch (e) { return { attivo: false }; }
+  async function leggi(percorso) {
+    try { return await (await fetch(percorso || '/api/orchestratore', { cache: 'no-store' })).json(); } catch (e) { return { attivo: false }; }
   }
 
-  // La voce di menu compare solo se config.json ha la chiave «smistatore».
+  // La voce di menu compare solo se config.json ha la chiave «smistatore». Rotta leggera: non lancia lo smistatore, quindi
+  // l'avvio della dashboard non lo aspetta.
   async function inizializza() {
-    const d = await leggi();
+    const d = await leggi('/api/orchestratore/attivo');
     const voce = document.querySelector('.schede button[data-vista="orchestratore"]');
     if (voce) voce.hidden = !d.attivo;
     return !!d.attivo;
   }
 
+  function vuota(messaggio) {
+    STATO.montato = false;
+    $('orch-dato').textContent = messaggio;
+    $('orch-contenuto').replaceChildren();
+  }
+
   async function carica() {
     const d = await leggi();
-    if (!d.attivo) { $('orch-dato').textContent = 'Lo smistatore non è collegato: serve la chiave «smistatore» in config.json.'; $('orch-contenuto').replaceChildren(); return; }
-    if (d.errore) { $('orch-dato').textContent = 'Lo smistatore non risponde (' + (CODICI[d.errore] || d.errore) + ').'; $('orch-contenuto').replaceChildren(); return; }
+    if (!d.attivo) return vuota('Lo smistatore non è collegato: serve la chiave «smistatore» in config.json.');
+    if (d.errore) return vuota('Lo smistatore non risponde (' + (CODICI[d.errore] || d.errore) + ').');
     STATO.dati = d;
-    disegna();
+    if (!STATO.montato) monta();
+    if (!STATO.configSporca) disegnaConfig();  // modifiche non salvate nella tabella non si cancellano
+    disegnaStorico();
   }
 
   window.Orchestratore = { carica, inizializza };

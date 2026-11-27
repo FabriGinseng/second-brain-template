@@ -1712,8 +1712,10 @@ $('tema').addEventListener('click', () => {
 });
 
 const hashIniziale = location.hash.slice(1);
-caricaModuli().then(() => window.Orchestratore && window.Orchestratore.inizializza()).then(() => {
+caricaModuli().then(() => {
   mostra(hashIniziale);
+  // La scheda Orchestratore non blocca l'avvio: la voce di menu compare quando la rotta leggera risponde.
+  if (window.Orchestratore) window.Orchestratore.inizializza().then(ok => { if (ok && hashIniziale === 'orchestratore') mostra('orchestratore'); });
   if (hashIniziale === 'bozze' && ammessa('post')) mostraSchedaPost('bozze');
   if (ammessa('post')) aggiornaBadgePost();
   setInterval(() => { CARICA[vista](); if (ammessa('post')) aggiornaBadgePost(); }, 30000);

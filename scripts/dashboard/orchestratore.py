@@ -147,7 +147,7 @@ def classifica(vault, richiesta, repo, elenco, tipo=None, livello=None, run=subp
     argv = ["chiedi", testo, "--repo", str(cartella), "--solo-classifica"]
     if tipo is not None:
         argv += ["--tipo", _campo(tipo)]
-    elif livello is not None:
+    if livello is not None:  # insieme al tipo: il livello vince (anche quello salito per incertezza), il tipo resta come etichetta
         argv += ["--livello", _campo(livello)]
     return chiama(vault, argv, run)
 
@@ -188,14 +188,17 @@ def avvia(vault, richiesta, repo, elenco, tipo=None, livello=None, prima=None, r
         raise NotImplementedError("solo macOS")
     testo, cartella = _richiesta(richiesta), _cartella(repo, elenco)
     d = classifica(vault, richiesta, repo, elenco, tipo=tipo, livello=livello, run=run)
-    if not isinstance(d, dict) or d.get("esecutore") not in ("paseo", "sessione") or not isinstance(d.get("modello"), str):
+    if (not isinstance(d, dict) or d.get("esecutore") not in ("paseo", "sessione") or not isinstance(d.get("modello"), str)
+            or not isinstance(d.get("livello"), str) or not (d.get("tipo") is None or isinstance(d.get("tipo"), str))):
         raise OrchestratoreErrore("uscita")
     with BLOCCO:
         chiave = (repo, testo)
         if chiave in ULTIMI and adesso() - ULTIMI[chiave] < DEBOUNCE:
             raise RuntimeError("ripetuto")
         ULTIMI[chiave] = adesso()
-    scelta = ["--tipo", d["tipo"]] if d.get("tipo") else ["--livello", d["livello"]]  # la decisione è del server, non del browser
+    # La decisione è del server, non del browser, e si rimanda intera: il tipo da solo ricalcolerebbe il livello dal tipo e
+    # perderebbe una salita per incertezza (un lavoro partirebbe su un livello più basso di quello mostrato).
+    scelta = (["--tipo", d["tipo"]] if d.get("tipo") else []) + ["--livello", d["livello"]]
     if prima is not None:
         scelta += ["--prima", _campo(prima)]
     smistatore = percorso_smistatore(vault)

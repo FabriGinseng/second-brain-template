@@ -2119,6 +2119,7 @@ ROTTE_JSON = {
     "/api/post/aperte": lambda: {"aperte": post_richieste_aperte()},
     "/api/post": lambda: post_calendari(),
     "/api/avvii": lambda: avvii(),
+    "/api/orchestratore/attivo": lambda: {"attivo": orchestratore_modulo.percorso_smistatore(VAULT) is not None},  # senza lanciare niente
     "/api/orchestratore": lambda: orchestratore_modulo.dati(VAULT, repo=lambda: orchestratore_repo(VAULT)),
     "/api/bozze": lambda: bozze_per_rete(),
     "/api/mappa": lambda: mappa(datetime.now()),

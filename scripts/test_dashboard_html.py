@@ -859,6 +859,19 @@ class SchedaOrchestratore(unittest.TestCase):
         for campo in ("v.harness", "v.agente", "v.modello", "v.esito", "v.tentativi"):
             self.assertIn(campo, self.js)
 
+    def test_l_avvio_della_dashboard_non_aspetta_lo_smistatore(self):
+        dash = (D / "dashboard.js").read_text(encoding="utf-8")
+        self.assertNotIn("inizializza()).then", dash)  # nessuna catena che aspetti la scheda prima di mostrare la prima pagina
+        self.assertIn("/api/orchestratore/attivo", self.js)
+
+    def test_il_refresh_non_cancella_la_casella_ne_la_proposta(self):
+        carica = self.js[self.js.index("async function carica()"):]
+        self.assertNotIn("richiesta()", carica)  # la casella si monta una volta (monta), non a ogni refresh
+        self.assertIn("configSporca", carica)
+
+    def test_il_lancio_rimanda_tipo_e_livello_dell_anteprima(self):
+        self.assertIn("livello: livSel.value", self.js)
+
     def test_il_lancio_dice_che_e_solo_macos(self):
         self.assertIn("darwin", self.js)
 

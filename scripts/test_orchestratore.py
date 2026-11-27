@@ -336,7 +336,7 @@ class Avvia(Base):
         smistatore = str(self.dir / "smistatore")
         # un solo motore: è lo smistatore a lanciare claude, e così scrive la sua riga di registro
         self.assertIn("exec %s chiedi \"$(cat " % shlex.quote(smistatore), testo_comando)
-        self.assertIn("--repo %s --tipo debug --prima ripetitivo" % shlex.quote(str(self.repo_dir)), testo_comando)
+        self.assertIn("--repo %s --tipo debug --livello alto --prima ripetitivo" % shlex.quote(str(self.repo_dir)), testo_comando)
         self.assertNotIn("claude", testo_comando)
         self.assertNotIn("perché", testo_comando)  # il testo sta nel file del prompt, non nel comando
         prompt = comando.with_suffix(".txt")
@@ -351,6 +351,22 @@ class Avvia(Base):
         testo = Path(self.aperture[0][0][3]).read_text()
         self.assertIn("'x; touch /tmp/x-orch3'", testo)
         self.assertIn("'y $(touch /tmp/x-orch4)'", testo)
+
+    def test_la_decisione_salita_per_incertezza_non_ridiscende(self):
+        # tipo «ripetitivo» (basso) salito ad alto perché il classificatore era incerto: il lancio rimanda tipo E livello
+        self.decisione = {**ALTO, "tipo": "ripetitivo", "incerto": True}
+        self.vai()
+        self.assertIn("--tipo ripetitivo --livello alto", Path(self.aperture[0][0][3]).read_text())
+        self.decisione = {**DECISIONE, "livello": "medio", "incerto": True, "modello": "m-medio"}
+        self.t += 11
+        self.vai("altra richiesta")
+        cmd = self.lanci[0][0]
+        self.assertEqual((cmd[cmd.index("--tipo") + 1], cmd[cmd.index("--livello") + 1]), ("ripetitivo", "medio"))
+
+    def test_tipo_e_livello_dell_anteprima_arrivano_insieme_allo_smistatore(self):
+        self.vai(tipo="ripetitivo", livello="alto")
+        solo = self.chiamate[0]
+        self.assertEqual((solo[solo.index("--tipo") + 1], solo[solo.index("--livello") + 1]), ("ripetitivo", "alto"))
 
     def test_senza_tipo_il_terminale_porta_il_livello(self):
         self.decisione = {**ALTO, "tipo": None}
@@ -426,6 +442,20 @@ class ElencoRepo(unittest.TestCase):
             (vault / "projects").mkdir()
             (vault / "config.json").write_text("{rotto")
             self.assertEqual(server.orchestratore_repo(vault), {})
+
+
+class RottaAttivo(Base):
+    def test_attivo_non_lancia_nessun_processo(self):
+        spec2 = importlib.util.spec_from_file_location("server_orch_attivo", RADICE / "scripts" / "dashboard" / "server.py")
+        server = importlib.util.module_from_spec(spec2)
+        spec2.loader.exec_module(server)
+        marca = self.dir / "lanciato"
+        f = eseguibile(self.dir, "touch %s\necho {}" % marca)
+        server.VAULT = self.vault
+        self.assertEqual(server.ROTTE_JSON["/api/orchestratore/attivo"](), {"attivo": False})
+        self.config(f)
+        self.assertEqual(server.ROTTE_JSON["/api/orchestratore/attivo"](), {"attivo": True})
+        self.assertFalse(marca.exists())  # la scoperta della scheda non aspetta lo smistatore (che può essere lento)
 
 
 class Rotta(unittest.TestCase):
