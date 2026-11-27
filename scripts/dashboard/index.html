@@ -24,6 +24,7 @@
     <button type="button" data-vista="consumi">Consumi</button>
     <div class="gruppo">Sistema</div>
     <button type="button" data-vista="avvii">Avvii</button>
+    <button type="button" data-vista="orchestratore" hidden>Orchestratore</button>
     <button type="button" data-vista="configurazione">Configurazione</button>
   </nav>
   <div class="piede-menu">
@@ -138,6 +139,12 @@
     <p class="sub" id="avvii-mac"></p>
   </div>
 
+  <div id="orchestratore-vista" hidden>
+    <div class="titolo"><p class="dato" id="orch-dato">caricamento…</p></div>
+    <p class="sub" id="orch-esito" role="status"></p>
+    <div id="orch-contenuto"></div>
+  </div>
+
   <div id="configurazione-vista" hidden>
     <div class="titolo"><p class="dato" id="conf-dato">caricamento…</p><div id="conf-azioni"></div></div>
     <div id="conf-schede"></div>
@@ -176,6 +183,7 @@
 
 <script src="/mappa.js" defer></script>
 <script src="/componenti.js" defer></script>
+<script src="/orchestratore.js" defer></script>
 <script src="/dashboard.js" defer></script>
 </body>
 </html>

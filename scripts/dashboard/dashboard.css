@@ -855,3 +855,14 @@ details.resto[open] > summary::before { transform: rotate(45deg); }
 .schema .etichetta-fondo { fill: var(--surface); stroke: var(--border); }
 .schema .etichetta { stroke: none; }
 @media (max-width: 640px) { #consumi-schede .scelta { flex-wrap: nowrap; } #consumi-schede .scelta button { white-space: nowrap; min-height: 44px; } }
+
+/* Scheda Orchestratore */
+#orchestratore-vista textarea { width: 100%; font: inherit; padding: 10px 12px; border: 1px solid var(--control); border-radius: var(--radius-control); background: var(--surface); color: var(--text); resize: vertical; }
+#orchestratore-vista input[type="text"], #orchestratore-vista select { font: inherit; padding: 6px 10px; border: 1px solid var(--control); border-radius: var(--radius-control); background: var(--surface); color: var(--text); min-width: 0; }
+#orchestratore-vista table.orch-tipi td { vertical-align: middle; padding: 6px 8px 6px 0; }
+#orchestratore-vista table.orch-tipi td input[type="text"] { width: 100%; }
+#orchestratore-vista .orch-elenco, #orchestratore-vista .orch-storico { list-style: none; margin: 0 0 12px; padding: 0; }
+#orchestratore-vista .orch-elenco li, #orchestratore-vista .orch-storico li { padding: 6px 0; border-bottom: 1px solid var(--rule); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+#orchestratore-vista .orch-proposta { margin-top: 12px; }
+#orchestratore-vista .errore { color: var(--negative); }
+@media (max-width: 720px) { #orchestratore-vista table.orch-tipi, #orchestratore-vista table.orch-tipi tbody, #orchestratore-vista table.orch-tipi tr, #orchestratore-vista table.orch-tipi td { display: block; } #orchestratore-vista table.orch-tipi thead { display: none; } }

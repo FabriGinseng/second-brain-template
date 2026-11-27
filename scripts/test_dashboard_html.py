@@ -744,7 +744,7 @@ console.log(JSON.stringify(out));
     def test_menu_a_quattro_gruppi(self):
         indice = (D / "index.html").read_text(encoding="utf-8")
         nav = indice[indice.index('id="schede"'):indice.index("</nav>")]
-        self.assertEqual(re.findall(r'data-vista="(\w+)"', nav), ["mappa", "agenda", "post", "radar", "consumi", "avvii", "configurazione"])
+        self.assertEqual(re.findall(r'data-vista="(\w+)"', nav), ["mappa", "agenda", "post", "radar", "consumi", "avvii", "orchestratore", "configurazione"])
         self.assertEqual(re.findall(r'class="gruppo">([^<]+)<', nav), ["Contenuti", "Risorse", "Sistema"])
 
     def test_hash_vecchi_hanno_un_alias(self):
@@ -815,6 +815,52 @@ class GraficiConsumi(unittest.TestCase):
         self.assertTrue(m)
         self.assertLessEqual(float(m.group(1)), 12)
         self.assertGreaterEqual(float(m.group(1)), 11)
+
+
+class SchedaOrchestratore(unittest.TestCase):
+    """La scheda Orchestratore: il menu parte nascosto (compare solo con la chiave «smistatore»), il file JS è servito e non costruisce HTML da stringhe."""
+
+    def setUp(self):
+        self.js = (D / "orchestratore.js").read_text(encoding="utf-8")
+        self.html = (D / "index.html").read_text(encoding="utf-8")
+
+    def test_il_menu_parte_nascosto_e_la_sezione_c_e(self):
+        self.assertRegex(self.html, r'<button[^>]*data-vista="orchestratore"[^>]*\bhidden\b')
+        self.assertIn('id="orchestratore-vista" hidden', self.html)
+        self.assertIn('src="/orchestratore.js"', self.html)
+
+    def test_il_file_e_servito(self):
+        server = (D / "server.py").read_text(encoding="utf-8")
+        self.assertIn('"/orchestratore.js": ("orchestratore.js", "text/javascript; charset=utf-8")', server)
+
+    def test_nessun_innerhtml_e_nessuna_valutazione_di_stringhe(self):
+        for vietato in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function"):
+            self.assertNotIn(vietato, self.js)
+
+    def test_ogni_id_usato_esiste_in_index_html(self):
+        usati = set(re.findall(r"""(?:getElementById|\$)\(\s*['"]([\w-]+)['"]""", self.js))
+        self.assertTrue(usati)
+        for i in usati:
+            self.assertIn('id="%s"' % i, self.html, i)
+
+    def test_nessun_percorso_personale(self):
+        for nome in ("orchestratore.js", "orchestratore.py", "index.html"):
+            testo = (D / nome).read_text(encoding="utf-8")
+            for vietato in ("/Users/", "/home/", "C:\\\\Users"):
+                self.assertNotIn(vietato, testo, nome)
+
+    def test_le_rotte_chiamate_esistono_nel_server(self):
+        server = (D / "server.py").read_text(encoding="utf-8")
+        for rotta in set(re.findall(r"'(/api/orchestratore[\w/]*)'", self.js)):
+            self.assertIn('"%s"' % rotta, server, rotta)
+
+    def test_il_lancio_dice_che_e_solo_macos(self):
+        self.assertIn("darwin", self.js)
+
+    def test_dashboard_js_carica_e_mostra_la_vista(self):
+        dash = (D / "dashboard.js").read_text(encoding="utf-8")
+        self.assertIn("orchestratore: () =>", dash)
+        self.assertIn("orchestratore: 'Orchestratore'", dash)
 
 
 if __name__ == "__main__":

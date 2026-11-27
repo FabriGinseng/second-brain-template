@@ -2127,6 +2127,7 @@ ROTTE_JSON = {
 STATICI = {"/dashboard.js": ("dashboard.js", "text/javascript; charset=utf-8"),
            "/mappa.js": ("mappa.js", "text/javascript; charset=utf-8"),
            "/componenti.js": ("componenti.js", "text/javascript; charset=utf-8"),
+           "/orchestratore.js": ("orchestratore.js", "text/javascript; charset=utf-8"),
            "/dashboard.css": ("dashboard.css", "text/css; charset=utf-8")}
 
 
