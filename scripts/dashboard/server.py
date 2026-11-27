@@ -53,6 +53,7 @@ calendario_modulo = _modulo(HERE.parent / "calendario.py")
 dipendenze = _modulo(HERE.parent / "dipendenze.py")
 BLOCCO_RICHIESTE = threading.Lock()  # una scrittura alla volta sul file delle richieste
 BLOCCO_PIANO = threading.Lock()  # lettura, modifica e scrittura di piano.md e scadenze.md: due clic veloci sono due thread
+BLOCCO_ORCHESTRATORE = threading.Lock()  # un cambio alle impostazioni dell'orchestratore alla volta
 BLOCCO_CONFIG = threading.Lock()  # un solo cambio alla volta ai file globali di Claude
 PORTA = 8765
 HOST_OK = {"127.0.0.1:%d" % PORTA, "localhost:%d" % PORTA}
@@ -2169,6 +2170,9 @@ class Gestore(BaseHTTPRequestHandler):
         if percorso in ("/api/post/richiesta", "/api/post/richiesta/annulla"):
             self._post_richiesta(percorso.endswith("/annulla"))
             return
+        if percorso == "/api/orchestratore/config":
+            self._orchestratore_config()
+            return
         if percorso in ("/api/configurazione/interruttore", "/api/configurazione/aggiorna"):
             self._configura(percorso.rsplit("/", 1)[1])
             return
@@ -2500,6 +2504,19 @@ class Gestore(BaseHTTPRequestHandler):
 
     def _errore(self, codice, messaggio):
         self._json({"errore": messaggio}, codice)
+
+    def _orchestratore_config(self):
+        """Cambi alle impostazioni dell'orchestratore: la richiesta passa per config_argv (tabella fissa) e poi per lo smistatore."""
+        try:
+            argv = orchestratore_modulo.config_argv(self._corpo_json())
+        except ValueError:
+            self._errore(400, "richiesta non valida")
+            return
+        with BLOCCO_ORCHESTRATORE:
+            try:
+                self._json(orchestratore_modulo.cambia_config(VAULT, argv))
+            except orchestratore_modulo.OrchestratoreErrore as e:
+                self._errore(409, orchestratore_modulo.senza_home(e.testo) or e.codice)
 
     def _configura(self, azione):
         """Cambi ai file globali di Claude: interruttori di skill e plugin, aggiornamento di una skill già controllata."""

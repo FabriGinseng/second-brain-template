@@ -64,3 +64,52 @@ def dati(vault, run=subprocess.run, repo=lambda: {}):
                 "repo": sorted(repo()), "sistema": sys.platform}
     except OrchestratoreErrore as e:
         return {"attivo": True, "errore": e.codice}
+
+
+# azione -> (parole del comando, campi posizionali in ordine, {campo facoltativo: opzione}). I repo riservati NON ci sono:
+# si cambiano solo dal terminale, così una pagina non può togliere la protezione.
+AZIONI = {
+    "tipo": (["tipo"], ["nome"], {"descrizione": "--descrizione", "livello": "--livello", "modello": "--modello"}),
+    "tipo-rimuovi": (["tipo-rimuovi"], ["nome"], {}),
+    "frontiera": (["frontiera"], ["modello"], {}),
+    "modello-aperto": (["modello-aperto"], ["verbo", "id"], {}),
+    "classificatore": (["classificatore"], [], {"backend": "--backend", "modello": "--modello", "ollama": "--ollama"}),
+}
+VERBI = {"aggiungi", "togli"}
+MASSIMO_CAMPO = 200
+
+
+def _campo(valore, vuoto=False):
+    """Un testo corto senza a capo né byte nulli che non inizia con «-» (diventerebbe un'opzione dello smistatore)."""
+    if (not isinstance(valore, str) or len(valore) > MASSIMO_CAMPO or (not valore and not vuoto) or valore.startswith("-")
+            or any(c in valore for c in "\n\r\x00")):
+        raise ValueError("richiesta")
+    return valore
+
+
+def config_argv(corpo):
+    """Gli argomenti di `smistatore config ...` per una richiesta del browser, o ValueError("richiesta")."""
+    if not isinstance(corpo, dict) or corpo.get("azione") not in AZIONI:
+        raise ValueError("richiesta")
+    parole, posizionali, facoltativi = AZIONI[corpo["azione"]]
+    if set(corpo) - {"azione", *posizionali, *facoltativi}:
+        raise ValueError("richiesta")
+    argv = list(parole)
+    for campo in posizionali:
+        argv.append(_campo(corpo.get(campo)))
+    if corpo["azione"] == "modello-aperto" and corpo["verbo"] not in VERBI:
+        raise ValueError("richiesta")
+    for campo, opzione in facoltativi.items():
+        if campo in corpo:
+            argv += [opzione, _campo(corpo[campo], vuoto=campo == "descrizione")]
+    return argv
+
+
+def senza_home(testo):
+    """Il testo di un errore dello smistatore può nominare un file dell'utente: la cartella di casa diventa «~»."""
+    return testo.replace(str(Path.home()), "~") if isinstance(testo, str) else testo
+
+
+def cambia_config(vault, argv, run=subprocess.run):
+    """Applica un cambio con `smistatore config *argv` e dà la configurazione risultante."""
+    return chiama(vault, ["config", *argv], run)
